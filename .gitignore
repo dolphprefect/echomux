@@ -1,0 +1,4 @@
+service/echomux
+.*
+CLAUDE.md
+service/internal/api/static/

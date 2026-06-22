@@ -1,0 +1,12 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">echomux</name>
+  <service>
+    <type>_echomux._tcp</type>
+    <port>56644</port>
+    <txt-record>api=v1</txt-record>
+    <txt-record>rtp_port=9001</txt-record>
+    <txt-record>rtp_codec=L16/48000/2</txt-record>
+  </service>
+</service-group>

@@ -1,0 +1,95 @@
+[
+  {
+    "id": 1,
+    "type": "PipeWire:Interface:Core",
+    "info": { "props": {} }
+  },
+  {
+    "id": 42,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "api.bluez5.address": "AA:BB:CC:DD:EE:FF",
+        "node.name": "bluez_output.AA_BB_CC_DD_EE_FF.1",
+        "node.description": "Speaker A"
+      }
+    }
+  },
+  {
+    "id": 77,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "api.bluez5.address": "11:22:33:44:55:66",
+        "node.name": "bluez_output.11_22_33_44_55_66.1",
+        "node.description": "Speaker B"
+      }
+    }
+  },
+  {
+    "id": 99,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Source",
+        "node.name": "rtp-source",
+        "node.description": "RTP Source"
+      }
+    }
+  },
+  {
+    "id": 10,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "node.name": "alsa_output.platform-bcm2835_audio.stereo-fallback",
+        "node.description": "Built-in Audio",
+        "audio.rate": 48000,
+        "audio.channels": 2
+      }
+    }
+  },
+  {
+    "id": 101,
+    "type": "PipeWire:Interface:Link",
+    "info": {
+      "output-node-id": 99,
+      "input-node-id": 42,
+      "state": "active",
+      "error": null
+    }
+  },
+  {
+    "id": 102,
+    "type": "PipeWire:Interface:Link",
+    "info": {
+      "output-node-id": 99,
+      "input-node-id": 42,
+      "state": "active",
+      "error": null
+    }
+  },
+  {
+    "id": 103,
+    "type": "PipeWire:Interface:Link",
+    "info": {
+      "output-node-id": 99,
+      "input-node-id": 77,
+      "state": "paused",
+      "error": null
+    }
+  },
+  {
+    "id": 104,
+    "type": "PipeWire:Interface:Link",
+    "info": {
+      "output-node-id": 99,
+      "input-node-id": 77,
+      "state": "paused",
+      "error": null
+    }
+  }
+]

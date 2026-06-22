@@ -1,0 +1,16 @@
+[Unit]
+Description=echomux — Bluetooth multi-room audio broadcaster
+After=bluetooth.service pipewire-system.service wireplumber-system.service
+Wants=pipewire-system.service wireplumber-system.service
+
+[Service]
+Type=simple
+User=REPLACE_USER
+EnvironmentFile=/etc/echomux/echomux.conf
+ExecStart=/usr/local/bin/echomux
+Restart=on-failure
+RestartSec=3
+Environment=PIPEWIRE_RUNTIME_DIR=/run/pipewire
+
+[Install]
+WantedBy=multi-user.target

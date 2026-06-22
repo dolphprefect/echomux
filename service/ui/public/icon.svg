@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#080c0b"/>
+  <!-- speaker cone -->
+  <circle cx="256" cy="256" r="90" fill="none" stroke="#c8953a" stroke-width="22"/>
+  <circle cx="256" cy="256" r="36" fill="#c8953a"/>
+  <!-- sound waves -->
+  <path d="M338 174 a116 116 0 0 1 0 164" fill="none" stroke="#c8953a" stroke-width="22" stroke-linecap="round"/>
+  <path d="M174 174 a116 116 0 0 0 0 164" fill="none" stroke="#c8953a" stroke-width="22" stroke-linecap="round"/>
+  <path d="M374 138 a164 164 0 0 1 0 236" fill="none" stroke="#c8953a" stroke-width="18" stroke-linecap="round" opacity="0.5"/>
+  <path d="M138 138 a164 164 0 0 0 0 236" fill="none" stroke="#c8953a" stroke-width="18" stroke-linecap="round" opacity="0.5"/>
+</svg>

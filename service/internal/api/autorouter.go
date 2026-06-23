@@ -27,20 +27,23 @@ type speakerState struct {
 	startedAt time.Time
 }
 
-// startupConnect tries to connect each known speaker after the BT/PW stack
-// has had time to settle. Runs once at service start; errors are non-fatal.
+// startupConnect reconnects the speakers that were connected at the previous
+// shutdown. Only those speakers are reconnected — not all known speakers —
+// so that a restart does not re-connect speakers the user had intentionally
+// disconnected. If no connected-speaker state was saved (first run or old
+// state file), nothing is reconnected and the user connects manually.
 func (s *server) startupConnect(ctx context.Context) {
 	time.Sleep(8 * time.Second)
 
 	s.mu.Lock()
-	macs := make([]string, 0, len(s.knownSpeakers))
-	for mac := range s.knownSpeakers {
+	macs := make([]string, 0, len(s.connectedSpeakers))
+	for mac := range s.connectedSpeakers {
 		macs = append(macs, mac)
 	}
 	s.mu.Unlock()
 
 	for _, mac := range macs {
-		s.dbg("startup: connecting known speaker %s", mac)
+		s.dbg("startup: reconnecting previously-connected speaker %s", mac)
 		if err := s.bt.Connect(ctx, mac); err != nil {
 			s.dbg("startup: connect %s failed: %v", mac, err)
 		}

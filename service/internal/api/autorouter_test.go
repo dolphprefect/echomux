@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -22,16 +25,17 @@ func newTestServerInternal(sinks []audio.Node, sources []audio.Node) (*server, *
 	}
 	btMgr := bluetooth.NewMockManager()
 	s := &server{
-		bt:               btMgr,
-		audio:            audioCtr,
-		hub:              newHub(),
-		speakers:         make(map[string]*speakerState),
-		delays:           make(map[string]int),
-		volumes:          make(map[string]int),
-		mutes:            make(map[string]bool),
-		knownSpeakers:    make(map[string]bool),
-		watchdogRestarts: make(map[string]time.Time),
-		spawn:            noopSpawn,
+		bt:                btMgr,
+		audio:             audioCtr,
+		hub:               newHub(),
+		speakers:          make(map[string]*speakerState),
+		delays:            make(map[string]int),
+		volumes:           make(map[string]int),
+		mutes:             make(map[string]bool),
+		knownSpeakers:     make(map[string]bool),
+		connectedSpeakers: make(map[string]bool),
+		watchdogRestarts:  make(map[string]time.Time),
+		spawn:             noopSpawn,
 	}
 	return s, audioCtr
 }
@@ -465,4 +469,55 @@ func TestTickRouter_ZombieWatchdog_NoRestartWhenNoLinks(t *testing.T) {
 	assert.Equal(t, 1, spawnCount, "empty link list must not trigger watchdog")
 
 	s.killAllLoopbacks()
+}
+
+// TestSaveState_IncludesLiveLoopback verifies that a speaker with a live loopback
+// process is written to connected_speakers in the state file. On the next restart,
+// startupConnect uses this list so only previously-connected speakers reconnect.
+func TestSaveState_IncludesLiveLoopback(t *testing.T) {
+	const mac = "AA:BB:CC:DD:EE:FF"
+	sinks := []audio.Node{{ID: 42, MAC: mac, Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"}}
+	s, _ := newTestServerInternal(sinks, nil)
+	s.stateFile = filepath.Join(t.TempDir(), "state.json")
+	s.spawn = func(_ string, _ int) *exec.Cmd { return exec.Command("sleep", "60") }
+
+	s.tickRouter(context.Background()) // starts a live loopback
+
+	s.saveState()
+
+	data, err := os.ReadFile(s.stateFile)
+	require.NoError(t, err)
+	var st map[string]any
+	require.NoError(t, json.Unmarshal(data, &st))
+	connected, ok := st["connected_speakers"].(map[string]any)
+	require.True(t, ok, "connected_speakers must be present in state file")
+	assert.True(t, connected[mac].(bool), "live speaker MAC must appear in connected_speakers")
+
+	s.killAllLoopbacks()
+}
+
+// TestSaveState_ExcludesDeadLoopback verifies that a speaker whose loopback process
+// has already exited is NOT written to connected_speakers. This prevents reconnecting
+// a speaker that crashed rather than one the user had intentionally connected.
+func TestSaveState_ExcludesDeadLoopback(t *testing.T) {
+	const mac = "AA:BB:CC:DD:EE:FF"
+	sinks := []audio.Node{{ID: 42, MAC: mac, Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"}}
+	s, _ := newTestServerInternal(sinks, nil)
+	s.stateFile = filepath.Join(t.TempDir(), "state.json")
+	s.spawn = noopSpawn // "true" exits immediately
+
+	s.tickRouter(context.Background())
+
+	// Wait for the process to exit.
+	time.Sleep(100 * time.Millisecond)
+
+	s.saveState()
+
+	data, err := os.ReadFile(s.stateFile)
+	require.NoError(t, err)
+	var st map[string]any
+	require.NoError(t, json.Unmarshal(data, &st))
+	if connected, ok := st["connected_speakers"].(map[string]any); ok {
+		assert.Empty(t, connected, "dead loopback must not appear in connected_speakers")
+	}
 }

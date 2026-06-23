@@ -30,11 +30,12 @@ type server struct {
 
 	mu                sync.Mutex
 	stateMu           sync.Mutex               // serialises saveState writes to disk
-	speakers          map[string]*speakerState // MAC → active loopback
-	delays            map[string]int           // MAC → delay_ms (persisted)
-	volumes           map[string]int           // MAC → volume 0-100 (persisted)
-	mutes             map[string]bool          // MAC → muted (persisted)
-	knownSpeakers     map[string]bool          // MACs that have registered as BT A2DP sinks (persisted)
+	speakers             map[string]*speakerState // MAC → active loopback
+	delays               map[string]int           // MAC → delay_ms (persisted)
+	volumes              map[string]int           // MAC → volume 0-100 (persisted)
+	mutes                map[string]bool          // MAC → muted (persisted)
+	knownSpeakers        map[string]bool          // MACs that have registered as BT A2DP sinks (persisted)
+	connectedSpeakers    map[string]bool          // MACs that had live loopbacks at last save (persisted)
 	watchdogRestarts  map[string]time.Time     // MAC → last watchdog-triggered restart time
 	paused            bool                     // when true, tickRouter is a no-op
 	stateFile         string
@@ -75,7 +76,8 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 		delays:           make(map[string]int),
 		volumes:          make(map[string]int),
 		mutes:            make(map[string]bool),
-		knownSpeakers:    make(map[string]bool),
+		knownSpeakers:       make(map[string]bool),
+		connectedSpeakers:   make(map[string]bool),
 		watchdogRestarts: make(map[string]time.Time),
 		spawn:            defaultSpawn,
 	}
@@ -106,10 +108,11 @@ func defaultSpawn(nodeName string, delayMS int) *exec.Cmd {
 }
 
 type savedState struct {
-	Delays        map[string]int  `json:"delays"`
-	Volumes       map[string]int  `json:"volumes"`
-	Mutes         map[string]bool `json:"mutes"`
-	KnownSpeakers map[string]bool `json:"known_speakers"`
+	Delays             map[string]int  `json:"delays"`
+	Volumes            map[string]int  `json:"volumes"`
+	Mutes              map[string]bool `json:"mutes"`
+	KnownSpeakers      map[string]bool `json:"known_speakers"`
+	ConnectedSpeakers  map[string]bool `json:"connected_speakers"`
 }
 
 func (s *server) loadState() {
@@ -133,6 +136,9 @@ func (s *server) loadState() {
 	if st.KnownSpeakers != nil {
 		s.knownSpeakers = st.KnownSpeakers
 	}
+	if st.ConnectedSpeakers != nil {
+		s.connectedSpeakers = st.ConnectedSpeakers
+	}
 }
 
 func (s *server) saveState() {
@@ -142,11 +148,18 @@ func (s *server) saveState() {
 	s.mu.Lock()
 	// Deep-copy maps before releasing the lock: json.Marshal iterates them
 	// and concurrent writes (handleVolume, etc.) would cause a data race.
+	connected := make(map[string]bool, len(s.speakers))
+	for mac, sp := range s.speakers {
+		if !speakerDead(sp) {
+			connected[mac] = true
+		}
+	}
 	st := savedState{
-		Delays:        copyIntMap(s.delays),
-		Volumes:       copyIntMap(s.volumes),
-		Mutes:         copyBoolMap(s.mutes),
-		KnownSpeakers: copyBoolMap(s.knownSpeakers),
+		Delays:            copyIntMap(s.delays),
+		Volumes:           copyIntMap(s.volumes),
+		Mutes:             copyBoolMap(s.mutes),
+		KnownSpeakers:     copyBoolMap(s.knownSpeakers),
+		ConnectedSpeakers: connected,
 	}
 	s.mu.Unlock()
 	data, err := json.Marshal(st)

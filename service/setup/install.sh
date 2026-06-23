@@ -51,23 +51,30 @@ BLUEZ_GOT=$(bluetoothd --version 2>/dev/null || echo "0")
 if printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then
     echo "==> BlueZ $BLUEZ_GOT OK (>= $BLUEZ_MIN), skipping upgrade."
 else
-    echo "==> BlueZ $BLUEZ_GOT is too old (< $BLUEZ_MIN). Installing 5.85+ from Debian Sid..."
-    # Pin Sid so only bluez is pulled from it; keep the config permanently
-    # so apt can always resolve the Sid-origin dependencies.
-    cat > /etc/apt/sources.list.d/sid-bluez.list << 'EOF'
-deb http://deb.debian.org/debian sid main
-EOF
-    cat > /etc/apt/preferences.d/sid-bluez-pin << 'EOF'
-Package: *
-Pin: release a=sid
-Pin-Priority: -1
+    echo "==> BlueZ $BLUEZ_GOT is too old (< $BLUEZ_MIN). Building latest BlueZ from source..."
 
-Package: bluez
-Pin: release a=sid
-Pin-Priority: 900
-EOF
+    # Enable deb-src for build-dep
+    sed -i '/^Types: deb$/a Types: deb-src' /etc/apt/sources.list.d/debian.sources 2>/dev/null \
+        || sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list 2>/dev/null \
+        || true
     apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" bluez
+
+    apt-get build-dep -y bluez
+
+    BLUEZ_VER=$(curl -fsSL https://api.github.com/repos/bluez/bluez/releases/latest \
+        | grep -oP '"tag_name":\s*"\K[^"]+' \
+        | sed 's/^v//')
+    echo "==> Building BlueZ ${BLUEZ_VER}..."
+    TARBALL="bluez-${BLUEZ_VER}.tar.xz"
+    curl -fL -o "/tmp/${TARBALL}" \
+        "https://www.kernel.org/pub/linux/bluetooth/${TARBALL}"
+    tar xf "/tmp/${TARBALL}" -C /tmp
+    cd "/tmp/bluez-${BLUEZ_VER}"
+    ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var
+    make -j"$(nproc)"
+    make install
+    cd /
+    rm -rf "/tmp/bluez-${BLUEZ_VER}" "/tmp/${TARBALL}"
 
     BLUEZ_GOT=$(bluetoothd --version 2>/dev/null || echo "0")
     if ! printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then

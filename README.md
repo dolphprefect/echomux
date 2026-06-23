@@ -39,21 +39,17 @@ Open the web UI on your phone, connect your speakers, and pick **echomux** as th
 
 - Linux with systemd
 - Bluetooth adapter (built-in or USB)
-- Go 1.21+ (for building)
 - Spotify Premium account (required by Spotify Connect / librespot)
-- `sudo` / root access for install
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/dolphprefect/echomux-pi
-cd echomux-pi
-sudo ./service/setup/install.sh
+curl -fsSL https://raw.githubusercontent.com/dolphprefect/echomux/main/service/setup/install.sh | bash
 ```
 
-The script installs PipeWire, WirePlumber, BlueZ 5.85+, librespot, builds the echomux binary, and enables all systemd services.
+The script installs PipeWire, WirePlumber, BlueZ 5.85+, librespot, downloads the pre-built echomux binary from GitHub Releases, and enables all systemd services.
 
 **Reboot after install.** Bluetooth kernel state may be stale before the first reboot.
 

@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 # install.sh — bootstrap echomux on a fresh Raspberry Pi OS (or Debian-based) install
-# Run as root:  sudo ./service/setup/install.sh
-# Or specify a different service user:  sudo SERVICE_USER=myuser ./service/setup/install.sh
+# Run:  curl -fsSL https://raw.githubusercontent.com/dolphprefect/echomux/main/service/setup/install.sh | bash
+# Or with a custom service user:
+#   curl -fsSL https://raw.githubusercontent.com/dolphprefect/echomux/main/service/setup/install.sh | SERVICE_USER=myuser bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SERVICE_DIR="$REPO_ROOT/service"
+# Files below are fetched from the main branch of this repo.
+RAW_BASE="https://raw.githubusercontent.com/dolphprefect/echomux/main"
 
-GITHUB_REPO="dolphprefect/echomux-pi"
+# Re-exec with sudo if not already root (so the one-liner works without | sudo).
+if [[ $EUID -ne 0 ]]; then
+    exec sudo bash -c "$(curl -fsSL "${RAW_BASE}/service/setup/install.sh")" "$@"
+fi
+
+# Binary is downloaded from GitHub Releases.
+GITHUB_REPO="dolphprefect/echomux"
 # Override ECHOMUX_VERSION to pin a specific release tag (e.g. v1.2.0).
 ECHOMUX_VERSION="${ECHOMUX_VERSION:-latest}"
 
@@ -98,22 +105,22 @@ usermod -aG audio,bluetooth "$SERVICE_USER"
 # ---------------------------------------------------------------------------
 echo "==> Writing WirePlumber headless config..."
 mkdir -p /etc/wireplumber/wireplumber.conf.d
-cp "$SERVICE_DIR/setup/50-systemwide.conf" \
-   /etc/wireplumber/wireplumber.conf.d/50-systemwide.conf
-cp "$SERVICE_DIR/setup/51-bluetooth-roles.conf" \
-   /etc/wireplumber/wireplumber.conf.d/51-bluetooth-roles.conf
-cp "$SERVICE_DIR/setup/52-bt-isolation.conf" \
-   /etc/wireplumber/wireplumber.conf.d/52-bt-isolation.conf
+curl -fLSo /etc/wireplumber/wireplumber.conf.d/50-systemwide.conf \
+    "${RAW_BASE}/service/setup/50-systemwide.conf"
+curl -fLSo /etc/wireplumber/wireplumber.conf.d/51-bluetooth-roles.conf \
+    "${RAW_BASE}/service/setup/51-bluetooth-roles.conf"
+curl -fLSo /etc/wireplumber/wireplumber.conf.d/52-bt-isolation.conf \
+    "${RAW_BASE}/service/setup/52-bt-isolation.conf"
 
 # ---------------------------------------------------------------------------
 # 3b. PipeWire: virtual main-mix sink + RTP source module
 # ---------------------------------------------------------------------------
 echo "==> Writing PipeWire config..."
 mkdir -p /etc/pipewire/pipewire.conf.d
-cp "$SERVICE_DIR/setup/10-rtp-source.conf" \
-   /etc/pipewire/pipewire.conf.d/10-rtp-source.conf
-cp "$SERVICE_DIR/setup/20-main-mix-loopback.conf" \
-   /etc/pipewire/pipewire.conf.d/20-main-mix-loopback.conf
+curl -fLSo /etc/pipewire/pipewire.conf.d/10-rtp-source.conf \
+    "${RAW_BASE}/service/setup/10-rtp-source.conf"
+curl -fLSo /etc/pipewire/pipewire.conf.d/20-main-mix-loopback.conf \
+    "${RAW_BASE}/service/setup/20-main-mix-loopback.conf"
 # Remove old loopback config if present from a previous install.
 rm -f /etc/pipewire/pipewire.conf.d/20-librespot-loopback.conf
 
@@ -248,7 +255,8 @@ chmod +x /usr/local/bin/echomux
 # 10. Install and enable the echomux systemd service
 # ---------------------------------------------------------------------------
 echo "==> Installing echomux.service..."
-sed "s/REPLACE_USER/$SERVICE_USER/" "$SERVICE_DIR/echomux.service" \
+curl -fsSL "${RAW_BASE}/service/echomux.service" \
+    | sed "s/REPLACE_USER/$SERVICE_USER/" \
     > /etc/systemd/system/echomux.service
 systemctl daemon-reload
 systemctl enable echomux.service
@@ -266,7 +274,8 @@ fi
 # ---------------------------------------------------------------------------
 echo "==> Installing mDNS service advertisement..."
 mkdir -p /etc/avahi/services
-cp "$SERVICE_DIR/setup/echomux-avahi.service" /etc/avahi/services/echomux.service
+curl -fLSo /etc/avahi/services/echomux.service \
+    "${RAW_BASE}/service/setup/echomux-avahi.service"
 systemctl enable --now avahi-daemon
 
 # ---------------------------------------------------------------------------
@@ -287,10 +296,13 @@ install -m 755 /tmp/raspotify-extract/usr/bin/librespot /usr/local/bin/librespot
 rm -rf "/tmp/${RASPOTIFY_DEB}" /tmp/raspotify-extract
 
 echo "==> Installing librespot-pipewire.sh wrapper..."
-install -m 755 "$SERVICE_DIR/setup/librespot-pipewire.sh" /usr/local/bin/librespot-pipewire.sh
+curl -fsSL "${RAW_BASE}/service/setup/librespot-pipewire.sh" \
+    > /usr/local/bin/librespot-pipewire.sh
+chmod +x /usr/local/bin/librespot-pipewire.sh
 
 echo "==> Installing librespot.service..."
-sed "s/REPLACE_USER/$SERVICE_USER/" "$SERVICE_DIR/setup/librespot.service" \
+curl -fsSL "${RAW_BASE}/service/setup/librespot.service" \
+    | sed "s/REPLACE_USER/$SERVICE_USER/" \
     > /etc/systemd/system/librespot.service
 systemctl daemon-reload
 systemctl enable --now librespot.service

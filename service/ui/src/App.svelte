@@ -31,12 +31,13 @@
     }
   }
 
-  let pollInterval, ws
+  let ws
 
   function connectWS() {
     if (destroyed) return
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     ws = new WebSocket(`${proto}//${location.host}/events`)
+    ws.onopen = () => { if (!destroyed) load() }
     ws.onmessage = e => {
       try {
         const ev = JSON.parse(e.data)
@@ -58,7 +59,6 @@
 
   onMount(() => {
     load()
-    pollInterval = setInterval(load, 5000)
     connectWS()
   })
 
@@ -66,7 +66,6 @@
     destroyed = true
     if (ws) ws.onclose = null
     ws?.close()
-    clearInterval(pollInterval)
   })
 
   async function doConnect(mac) {

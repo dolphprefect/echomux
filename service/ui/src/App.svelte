@@ -75,6 +75,8 @@
     connectErrors = rest  // clear any previous error for this MAC
     try {
       await api('POST', `/devices/${mac}/connect`)
+      const dev = devices.find(d => d.MAC === mac)
+      if (dev) { dev.Connected = true; devices = devices }
     } catch(e) {
       const msg = e.message.includes('org.bluez') ? 'Connection failed' : (e.message || 'Connection failed')
       connectErrors = { ...connectErrors, [mac]: msg }

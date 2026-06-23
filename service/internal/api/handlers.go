@@ -453,6 +453,9 @@ func (s *server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.dbg("connect %s: BT connected, waiting for PW node", mac)
+	// Always broadcast connected here — bt.Connect() only emits the event when
+	// d.Connect() returns nil, so the "AlreadyConnected" success path is silent.
+	go s.hub.broadcast(context.Background(), map[string]string{"type": "connected", "mac": mac})
 	go func() {
 		time.Sleep(2 * time.Second)
 		for i := 0; i < 60; i++ {

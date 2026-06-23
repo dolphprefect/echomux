@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build UI
+        run: |
+          cd service/ui
+          npm ci
+          npm run build
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: service/go.mod
+
+      - name: Build arm64 binary
+        run: |
+          cd service
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o echomux-linux-arm64 ./cmd/echomux/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: service/echomux-linux-arm64
+          generate_release_notes: true

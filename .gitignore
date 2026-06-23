@@ -1,4 +1,6 @@
 service/echomux
 .*
+!.github
 CLAUDE.md
 service/internal/api/static/
+*.local

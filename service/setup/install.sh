@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # install.sh — bootstrap echomux on a fresh Raspberry Pi OS (or Debian-based) install
 # Run as root:  sudo ./service/setup/install.sh
-# Or specify a different service user:  sudo SERVICE_USER=myuser ./pi/setup/install.sh
+# Or specify a different service user:  sudo SERVICE_USER=myuser ./service/setup/install.sh
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PI_DIR="$REPO_ROOT/pi"
+SERVICE_DIR="$REPO_ROOT/service"
+
+GITHUB_REPO="dolphprefect/echomux-pi"
+# Override ECHOMUX_VERSION to pin a specific release tag (e.g. v1.2.0).
+ECHOMUX_VERSION="${ECHOMUX_VERSION:-latest}"
 
 # ---------------------------------------------------------------------------
 # Determine which user will own the audio services and run echomux
@@ -24,15 +28,16 @@ echo "==> Installing system packages..."
 apt-get update -qq
 apt-get install -y --no-install-recommends \
     pipewire \
+    pipewire-bin \
     wireplumber \
     pipewire-pulse \
     libspa-0.2-bluetooth \
-    golang-go \
-    git \
-    libbluetooth-dev \
-    build-essential \
+    curl \
     avahi-daemon \
     rfkill
+# pipewire-bin: pw-loopback (one per speaker), pw-link (main-mix wiring), pw-dump (snapshot)
+# wireplumber:  wpctl (volume/mute control)
+# libspa-0.2-bluetooth: PipeWire Bluetooth SPA plugin (A2DP codec negotiation)
 
 # BlueZ 5.83+ fixes simultaneous A2DP connections to multiple sinks (commit 05f8bd4).
 # Debian Trixie ships 5.82 which has the bug; install 5.85 from Sid pinned just for bluez.
@@ -53,6 +58,15 @@ apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" bluez
 rm /etc/apt/sources.list.d/sid-bluez.list /etc/apt/preferences.d/sid-bluez-pin
 apt-get update -qq
+
+BLUEZ_MIN="5.83"
+BLUEZ_GOT=$(bluetoothd --version 2>/dev/null || echo "0")
+if ! printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then
+    echo "ERROR: BlueZ $BLUEZ_GOT installed but minimum required is $BLUEZ_MIN." >&2
+    echo "       Simultaneous A2DP to multiple sinks will not work without it." >&2
+    exit 1
+fi
+echo "==> BlueZ $BLUEZ_GOT OK (>= $BLUEZ_MIN)"
 
 # ---------------------------------------------------------------------------
 # 1b. Unblock Bluetooth (rfkill soft-block is the most common reason a USB BT
@@ -84,11 +98,11 @@ usermod -aG audio,bluetooth "$SERVICE_USER"
 # ---------------------------------------------------------------------------
 echo "==> Writing WirePlumber headless config..."
 mkdir -p /etc/wireplumber/wireplumber.conf.d
-cp "$PI_DIR/setup/50-systemwide.conf" \
+cp "$SERVICE_DIR/setup/50-systemwide.conf" \
    /etc/wireplumber/wireplumber.conf.d/50-systemwide.conf
-cp "$PI_DIR/setup/51-bluetooth-roles.conf" \
+cp "$SERVICE_DIR/setup/51-bluetooth-roles.conf" \
    /etc/wireplumber/wireplumber.conf.d/51-bluetooth-roles.conf
-cp "$PI_DIR/setup/52-bt-isolation.conf" \
+cp "$SERVICE_DIR/setup/52-bt-isolation.conf" \
    /etc/wireplumber/wireplumber.conf.d/52-bt-isolation.conf
 
 # ---------------------------------------------------------------------------
@@ -96,9 +110,9 @@ cp "$PI_DIR/setup/52-bt-isolation.conf" \
 # ---------------------------------------------------------------------------
 echo "==> Writing PipeWire config..."
 mkdir -p /etc/pipewire/pipewire.conf.d
-cp "$PI_DIR/setup/10-rtp-source.conf" \
+cp "$SERVICE_DIR/setup/10-rtp-source.conf" \
    /etc/pipewire/pipewire.conf.d/10-rtp-source.conf
-cp "$PI_DIR/setup/20-main-mix-loopback.conf" \
+cp "$SERVICE_DIR/setup/20-main-mix-loopback.conf" \
    /etc/pipewire/pipewire.conf.d/20-main-mix-loopback.conf
 # Remove old loopback config if present from a previous install.
 rm -f /etc/pipewire/pipewire.conf.d/20-librespot-loopback.conf
@@ -213,30 +227,28 @@ ECHOMUX_ADDR=:56644
 # Spotify Connect device name — shown in the Spotify app source picker.
 ECHOMUX_SPOTIFY_NAME=echomux
 
-# TLS — comment out to use plain HTTP.
-# Enabling HTTPS is required for the PWA install on Android (chromeless mode).
-# See README.md for mkcert instructions.
-# ECHOMUX_TLS_CERT=/etc/echomux/tls/cert.pem
-# ECHOMUX_TLS_KEY=/etc/echomux/tls/key.pem
-# ECHOMUX_TLS_CA=/etc/echomux/tls/ca.pem
-
 # Uncomment to enable verbose debug logging.
 # ECHOMUX_DEBUG=true
 CONF
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Build echomux binary
+# 9. Download pre-built echomux binary from GitHub Releases
 # ---------------------------------------------------------------------------
-echo "==> Building echomux..."
-cd "$PI_DIR"
-go build -o /usr/local/bin/echomux ./cmd/echomux
+echo "==> Downloading echomux binary (${ECHOMUX_VERSION})..."
+if [[ "$ECHOMUX_VERSION" == "latest" ]]; then
+    DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/echomux-linux-arm64"
+else
+    DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${ECHOMUX_VERSION}/echomux-linux-arm64"
+fi
+curl -fL -o /usr/local/bin/echomux "${DOWNLOAD_URL}"
+chmod +x /usr/local/bin/echomux
 
 # ---------------------------------------------------------------------------
 # 10. Install and enable the echomux systemd service
 # ---------------------------------------------------------------------------
 echo "==> Installing echomux.service..."
-sed "s/REPLACE_USER/$SERVICE_USER/" "$PI_DIR/echomux.service" \
+sed "s/REPLACE_USER/$SERVICE_USER/" "$SERVICE_DIR/echomux.service" \
     > /etc/systemd/system/echomux.service
 systemctl daemon-reload
 systemctl enable echomux.service
@@ -254,7 +266,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "==> Installing mDNS service advertisement..."
 mkdir -p /etc/avahi/services
-cp "$PI_DIR/setup/echomux-avahi.service" /etc/avahi/services/echomux.service
+cp "$SERVICE_DIR/setup/echomux-avahi.service" /etc/avahi/services/echomux.service
 systemctl enable --now avahi-daemon
 
 # ---------------------------------------------------------------------------
@@ -275,10 +287,10 @@ install -m 755 /tmp/raspotify-extract/usr/bin/librespot /usr/local/bin/librespot
 rm -rf "/tmp/${RASPOTIFY_DEB}" /tmp/raspotify-extract
 
 echo "==> Installing librespot-pipewire.sh wrapper..."
-install -m 755 "$PI_DIR/setup/librespot-pipewire.sh" /usr/local/bin/librespot-pipewire.sh
+install -m 755 "$SERVICE_DIR/setup/librespot-pipewire.sh" /usr/local/bin/librespot-pipewire.sh
 
 echo "==> Installing librespot.service..."
-sed "s/REPLACE_USER/$SERVICE_USER/" "$PI_DIR/setup/librespot.service" \
+sed "s/REPLACE_USER/$SERVICE_USER/" "$SERVICE_DIR/setup/librespot.service" \
     > /etc/systemd/system/librespot.service
 systemctl daemon-reload
 systemctl enable --now librespot.service

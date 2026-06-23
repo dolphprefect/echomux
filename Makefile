@@ -1,7 +1,9 @@
-BINARY := /usr/local/bin/echomux
+BINARY  := /usr/local/bin/echomux
 SERVICE := echomux
 
-.PHONY: build ui install deploy restart
+.PHONY: build ui install deploy
+
+-include Makefile.local
 
 ui:
 	cd service/ui && npm run build

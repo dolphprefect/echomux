@@ -101,11 +101,13 @@ describe('DeviceCard', () => {
     expect(container.querySelector('.card-body')).toBeNull()
   })
 
-  it('shows volume controls when connected', () => {
+  it('shows volume controls and delay chip when connected', () => {
     const dev = { ...baseDevice, Connected: true }
     const { container } = render(DeviceCard, { props: { device: dev } })
     expect(container.querySelector('.vol-row')).not.toBeNull()
-    expect(container.querySelector('.delay-row')).not.toBeNull()
+    // delay chip moved to card-top (left of disconnect button) — no longer in card-body
+    expect(container.querySelector('.card-top .delay-chip')).not.toBeNull()
+    expect(container.querySelector('.delay-row')).toBeNull()
   })
 
   it('dispatches volumeChange on slider commit', async () => {

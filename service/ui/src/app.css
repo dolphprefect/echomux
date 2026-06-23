@@ -123,7 +123,8 @@ header {
   padding: 13px 12px 13px 16px;
 }
 
-.card-identity { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.card-identity { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1; }
+.card-actions  { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
 .dot {
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
@@ -228,13 +229,6 @@ header {
 }
 
 /* ── Delay chip ── */
-.delay-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  margin-top: 9px;
-}
-
 .delay-chip {
   display: inline-flex;
   align-items: center;

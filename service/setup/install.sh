@@ -46,13 +46,18 @@ apt-get install -y --no-install-recommends \
 # wireplumber:  wpctl (volume/mute control)
 # libspa-0.2-bluetooth: PipeWire Bluetooth SPA plugin (A2DP codec negotiation)
 
-# BlueZ 5.83+ fixes simultaneous A2DP connections to multiple sinks (commit 05f8bd4).
-# Debian Trixie ships 5.82 which has the bug; install 5.85 from Sid pinned just for bluez.
-echo "==> Installing BlueZ 5.85+ (multi-sink A2DP fix)..."
-cat > /etc/apt/sources.list.d/sid-bluez.list << 'EOF'
+BLUEZ_MIN="5.83"
+BLUEZ_GOT=$(bluetoothd --version 2>/dev/null || echo "0")
+if printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then
+    echo "==> BlueZ $BLUEZ_GOT OK (>= $BLUEZ_MIN), skipping upgrade."
+else
+    echo "==> BlueZ $BLUEZ_GOT is too old (< $BLUEZ_MIN). Installing 5.85+ from Debian Sid..."
+    # Pin Sid so only bluez is pulled from it; keep the config permanently
+    # so apt can always resolve the Sid-origin dependencies.
+    cat > /etc/apt/sources.list.d/sid-bluez.list << 'EOF'
 deb http://deb.debian.org/debian sid main
 EOF
-cat > /etc/apt/preferences.d/sid-bluez-pin << 'EOF'
+    cat > /etc/apt/preferences.d/sid-bluez-pin << 'EOF'
 Package: *
 Pin: release a=sid
 Pin-Priority: -1
@@ -61,19 +66,17 @@ Package: bluez
 Pin: release a=sid
 Pin-Priority: 900
 EOF
-apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" bluez
-rm /etc/apt/sources.list.d/sid-bluez.list /etc/apt/preferences.d/sid-bluez-pin
-apt-get update -qq
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" bluez
 
-BLUEZ_MIN="5.83"
-BLUEZ_GOT=$(bluetoothd --version 2>/dev/null || echo "0")
-if ! printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then
-    echo "ERROR: BlueZ $BLUEZ_GOT installed but minimum required is $BLUEZ_MIN." >&2
-    echo "       Simultaneous A2DP to multiple sinks will not work without it." >&2
-    exit 1
+    BLUEZ_GOT=$(bluetoothd --version 2>/dev/null || echo "0")
+    if ! printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then
+        echo "ERROR: BlueZ $BLUEZ_GOT still below minimum $BLUEZ_MIN." >&2
+        echo "       Simultaneous A2DP to multiple sinks will not work." >&2
+        exit 1
+    fi
+    echo "==> BlueZ $BLUEZ_GOT OK (>= $BLUEZ_MIN)"
 fi
-echo "==> BlueZ $BLUEZ_GOT OK (>= $BLUEZ_MIN)"
 
 # ---------------------------------------------------------------------------
 # 1b. Unblock Bluetooth (rfkill soft-block is the most common reason a USB BT

@@ -403,7 +403,35 @@ func TestGetDevices_PendingVolumeResolution(t *testing.T) {
 
 	nodes := []audio.Node{{ID: 42, MAC: "AA:BB:CC:DD:EE:FF", Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"}}
 	audioCtr := audio.NewMockController(nodes)
-	// Explicitly set volume to 0 so GetVolume is queried for this node.
+	// Inject error to GetVolume() call to simulate unavailable volume.
+	audioCtr.SetGetVolumeErr(errors.New("PipeWire volume query failed"))
+
+	noop := func(nodeName string, _ int) *exec.Cmd { return exec.Command("true") }
+	srv := api.NewServer(btMgr, audioCtr,
+		api.WithSpawn(noop),
+		api.WithKnownSpeakers("AA:BB:CC:DD:EE:FF"),
+	)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	// MockController.GetVolume returns an error, so handleGetDevices should
+	// mark volume as -1.
+	resp, err := http.Get(ts.URL + "/devices")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var devs []map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&devs))
+	require.Len(t, devs, 1)
+	assert.Equal(t, float64(-1), devs[0]["volume"])
+}
+
+func TestGetDevices_VolumeZeroResolution(t *testing.T) {
+	btMgr := bluetooth.NewMockManager()
+	btMgr.AddDevice(bluetooth.Device{MAC: "AA:BB:CC:DD:EE:FF", Name: "Speaker A", Paired: true})
+
+	nodes := []audio.Node{{ID: 42, MAC: "AA:BB:CC:DD:EE:FF", Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"}}
+	audioCtr := audio.NewMockController(nodes)
+	// Explicitly set volume to 0 so MockController returns 0.
 	audioCtr.SetVolume(context.Background(), 42, 0) //nolint
 
 	noop := func(nodeName string, _ int) *exec.Cmd { return exec.Command("true") }
@@ -414,16 +442,14 @@ func TestGetDevices_PendingVolumeResolution(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	// MockController.GetVolume returns 0 (not stored), so handleGetDevices should
-	// mark volume as -1 (PW node volume unavailable/zero).
+	// GetVolume returns 0, so handleGetDevices should resolve the volume to 0.
 	resp, err := http.Get(ts.URL + "/devices")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	var devs []map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&devs))
 	require.Len(t, devs, 1)
-	// volume == 0 triggers pending path; mock returns 0 (not > 0) so result is -1
-	assert.Equal(t, float64(-1), devs[0]["volume"])
+	assert.Equal(t, float64(0), devs[0]["volume"])
 }
 
 func TestGetDevices_NodesErrorOnPendingVolume(t *testing.T) {

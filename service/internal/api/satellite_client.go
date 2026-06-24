@@ -154,7 +154,7 @@ func (s *server) satSendDevices(ctx context.Context, conn *websocket.Conn, write
 			for _, idx := range pendingIdxs {
 				mac := items[idx].MAC
 				if nodeID, ok := nodeByMAC[mac]; ok {
-					if v, err := s.audio.GetVolume(ctx, nodeID); err == nil && v > 0 {
+					if v, err := s.audio.GetVolume(ctx, nodeID); err == nil && v >= 0 {
 						items[idx].Volume = v
 						continue
 					}

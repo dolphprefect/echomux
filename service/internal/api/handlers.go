@@ -393,7 +393,7 @@ func (s *server) handleGetDevices(w http.ResponseWriter, r *http.Request) {
 		for _, idx := range pendingIdxs {
 			mac := out[idx].MAC
 			if nodeID, ok := nodeByMAC[mac]; ok {
-				if v, err := s.audio.GetVolume(r.Context(), nodeID); err == nil && v > 0 {
+				if v, err := s.audio.GetVolume(r.Context(), nodeID); err == nil && v >= 0 {
 					out[idx].Volume = v
 					continue
 				}

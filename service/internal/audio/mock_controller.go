@@ -20,6 +20,7 @@ type MockController struct {
 	nodesErr     error
 	snapshotErr  error
 	volumeErr    error
+	getVolumeErr error
 	muteErr      error
 	rtpModuleID    int
 	rtpAddErr      error
@@ -63,6 +64,13 @@ func (c *MockController) SetSnapshotErr(err error) {
 func (c *MockController) SetVolumeErr(err error) {
 	c.mu.Lock()
 	c.volumeErr = err
+	c.mu.Unlock()
+}
+
+// SetGetVolumeErr causes GetVolume() to return err.
+func (c *MockController) SetGetVolumeErr(err error) {
+	c.mu.Lock()
+	c.getVolumeErr = err
 	c.mu.Unlock()
 }
 
@@ -199,6 +207,9 @@ func (c *MockController) SetMute(_ context.Context, nodeID int, muted bool) erro
 func (c *MockController) GetVolume(_ context.Context, nodeID int) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.getVolumeErr != nil {
+		return 0, c.getVolumeErr
+	}
 	if v, ok := c.volumes[nodeID]; ok {
 		return v, nil
 	}

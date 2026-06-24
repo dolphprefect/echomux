@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +20,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func mustReadBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	b, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(bytes.TrimSpace(b))
+}
 
 func newTestServer(t *testing.T) (*httptest.Server, *bluetooth.MockManager, *audio.MockController) {
 	t.Helper()
@@ -492,7 +500,11 @@ func TestGetDevices_DevicesError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
-func TestPostScan_DevicesErrAfterScan(t *testing.T) {
+// TestPostScan_DevicesError_Returns200Empty verifies that a Devices() failure
+// after a successful scan returns 200 with an empty array, not a 5xx.
+// POST /scan commits to 200 before the scan starts so reverse proxies see
+// response headers immediately; errors cannot change the status after that.
+func TestPostScan_DevicesError_Returns200Empty(t *testing.T) {
 	ts, btMgr, _ := newTestServer(t)
 	defer ts.Close()
 
@@ -502,9 +514,8 @@ func TestPostScan_DevicesErrAfterScan(t *testing.T) {
 	resp, err := http.Post(ts.URL+"/scan", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	// 200 + empty array: headers are committed before the scan runs, so errors
-	// cannot change the status code (deliberate behaviour change).
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.JSONEq(t, `[]`, mustReadBody(t, resp))
 }
 
 // TestPostConnect_TransientErrRetries verifies that a transient Connect error
@@ -739,7 +750,11 @@ func TestGetDevices_ExcludesNonKnownSpeakers(t *testing.T) {
 	}
 }
 
-func TestPostScan_ScanError(t *testing.T) {
+// TestPostScan_ScanError_Returns200Empty verifies that a Scan() failure returns
+// 200 with an empty array, not a 5xx. POST /scan commits to 200 before the
+// scan starts so reverse proxies see response headers immediately; errors
+// cannot change the status after that.
+func TestPostScan_ScanError_Returns200Empty(t *testing.T) {
 	ts, btMgr, _ := newTestServer(t)
 	defer ts.Close()
 
@@ -749,9 +764,8 @@ func TestPostScan_ScanError(t *testing.T) {
 	resp, err := http.Post(ts.URL+"/scan", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	// 200 + empty array: headers are committed before the scan runs, so errors
-	// cannot change the status code (deliberate behaviour change).
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.JSONEq(t, `[]`, mustReadBody(t, resp))
 }
 
 func TestPostScan_DefaultTimeout(t *testing.T) {

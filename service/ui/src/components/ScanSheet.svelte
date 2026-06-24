@@ -9,6 +9,7 @@
 
   let busy = true
   let results = []
+  let scanError = null
   let adding = {}      // MAC → 'loading' | 'done' | 'error'
   let prevConnected = []
 
@@ -24,12 +25,17 @@
   async function startScan() {
     busy = true
     results = []
+    scanError = null
     adding = {}
     try {
-      const all = await api('POST', '/scan', { timeout_sec: 10 }, nodeId)
-      results = all.filter(d => !knownMACs.has(d.MAC))
+      const resp = await api('POST', '/scan', { timeout_sec: 10 }, nodeId)
+      if (resp.error) {
+        scanError = resp.error
+      } else {
+        results = (resp.devices || []).filter(d => !knownMACs.has(d.MAC))
+      }
     } catch(e) {
-      results = []
+      scanError = e.message || 'Scan failed'
     }
     busy = false
   }
@@ -72,7 +78,11 @@
         Scanning&hellip;
       </div>
     {:else}
-      {#if results.length === 0}
+      {#if scanError}
+        <p class="scan-status scan-error">
+          Scan failed: {scanError}
+        </p>
+      {:else if results.length === 0}
         <p class="scan-status">
           No new speakers found.<br>Make sure it's in pairing mode.
         </p>

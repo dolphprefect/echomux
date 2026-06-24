@@ -90,9 +90,13 @@ func TestPostScan(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var devs []map[string]any
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&devs))
-	assert.NotEmpty(t, devs)
+	var result struct {
+		Devices []map[string]any `json:"devices"`
+		Error   string           `json:"error"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Empty(t, result.Error)
+	assert.NotEmpty(t, result.Devices)
 }
 
 func TestPostConnect(t *testing.T) {
@@ -515,7 +519,10 @@ func TestPostScan_DevicesError_Returns200Empty(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.JSONEq(t, `[]`, mustReadBody(t, resp))
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(mustReadBody(t, resp)), &got))
+	assert.Empty(t, got["devices"])
+	assert.NotEmpty(t, got["error"])
 }
 
 // TestPostConnect_TransientErrRetries verifies that a transient Connect error
@@ -765,7 +772,10 @@ func TestPostScan_ScanError_Returns200Empty(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.JSONEq(t, `[]`, mustReadBody(t, resp))
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(mustReadBody(t, resp)), &got))
+	assert.Empty(t, got["devices"])
+	assert.NotEmpty(t, got["error"])
 }
 
 func TestPostScan_DefaultTimeout(t *testing.T) {

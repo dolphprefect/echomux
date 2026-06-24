@@ -46,7 +46,10 @@ func TestHandleScan_ScanError_UnpausesAndReturnsEmpty(t *testing.T) {
 	s.handleScan(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.JSONEq(t, `[]`, w.Body.String(), "error response body must be empty array")
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(w.Body.String()), &got))
+	assert.Empty(t, got["devices"], "devices must be empty on error")
+	assert.NotEmpty(t, got["error"], "error field must be set on scan failure")
 	s.mu.Lock()
 	paused := s.paused
 	s.mu.Unlock()
@@ -119,7 +122,10 @@ func TestHandleScan_DevicesError_UnpausesAndReturnsEmpty(t *testing.T) {
 	s.handleScan(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.JSONEq(t, `[]`, w.Body.String(), "error response body must be empty array")
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(w.Body.String()), &got))
+	assert.Empty(t, got["devices"], "devices must be empty on error")
+	assert.NotEmpty(t, got["error"], "error field must be set on devices failure")
 	s.mu.Lock()
 	paused := s.paused
 	s.mu.Unlock()

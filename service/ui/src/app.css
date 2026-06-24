@@ -370,6 +370,8 @@ input[type=range]:disabled { opacity: .35; cursor: default; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.scan-error { color: var(--red); }
+
 .scan-item {
   display: flex;
   align-items: center;

@@ -501,13 +501,18 @@ func (s *server) handleScan(w http.ResponseWriter, r *http.Request) {
 	// scan sheet closes). This avoids races between the reconnect goroutine
 	// and any subsequent pair/connect calls the client may make.
 
+	type scanResult struct {
+		Devices []bluetooth.Device `json:"devices"`
+		Error   string             `json:"error,omitempty"`
+	}
+
 	if scanErr != nil {
 		// Unpause immediately on error: the context.AfterFunc callback only fires on
 		// client disconnect, not on a scan failure while the connection is still open.
 		s.mu.Lock()
 		s.paused = false
 		s.mu.Unlock()
-		json.NewEncoder(w).Encode([]any{})
+		json.NewEncoder(w).Encode(scanResult{Devices: []bluetooth.Device{}, Error: scanErr.Error()})
 		return
 	}
 	devs, err := s.bt.Devices(r.Context())
@@ -515,10 +520,10 @@ func (s *server) handleScan(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.paused = false
 		s.mu.Unlock()
-		json.NewEncoder(w).Encode([]any{})
+		json.NewEncoder(w).Encode(scanResult{Devices: []bluetooth.Device{}, Error: err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(devs)
+	json.NewEncoder(w).Encode(scanResult{Devices: devs})
 }
 
 func (s *server) handleConnect(w http.ResponseWriter, r *http.Request) {

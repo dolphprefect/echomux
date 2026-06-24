@@ -28,6 +28,10 @@ type server struct {
 	hub   *hub
 	mux   *http.ServeMux
 
+	mode       Mode
+	name       string
+	masterAddr string
+
 	mu                sync.Mutex
 	stateMu           sync.Mutex               // serialises saveState writes to disk
 	speakers             map[string]*speakerState // MAC → active loopback
@@ -54,9 +58,12 @@ func (s *server) dbg(format string, args ...any) {
 // Option configures a server.
 type Option func(*server)
 
-func WithStateFile(path string) Option { return func(s *server) { s.stateFile = path } }
-func WithSpawn(fn SpawnFn) Option      { return func(s *server) { s.spawn = fn } }
-func WithDebug(debug bool) Option      { return func(s *server) { s.debug = debug } }
+func WithStateFile(path string) Option  { return func(s *server) { s.stateFile = path } }
+func WithSpawn(fn SpawnFn) Option       { return func(s *server) { s.spawn = fn } }
+func WithDebug(debug bool) Option       { return func(s *server) { s.debug = debug } }
+func WithMode(m Mode) Option            { return func(s *server) { s.mode = m } }
+func WithName(n string) Option          { return func(s *server) { s.name = n } }
+func WithMasterAddr(addr string) Option { return func(s *server) { s.masterAddr = addr } }
 
 // WithKnownSpeakers pre-seeds the knownSpeakers set — intended for tests.
 func WithKnownSpeakers(macs ...string) Option {
@@ -69,20 +76,29 @@ func WithKnownSpeakers(macs ...string) Option {
 
 func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) http.Handler {
 	s := &server{
-		bt:               bt,
-		audio:            audio,
-		hub:              newHub(),
-		speakers:         make(map[string]*speakerState),
-		delays:           make(map[string]int),
-		volumes:          make(map[string]int),
-		mutes:            make(map[string]bool),
-		knownSpeakers:       make(map[string]bool),
-		connectedSpeakers:   make(map[string]bool),
-		watchdogRestarts: make(map[string]time.Time),
-		spawn:            defaultSpawn,
+		bt:                bt,
+		audio:             audio,
+		hub:               newHub(),
+		speakers:          make(map[string]*speakerState),
+		delays:            make(map[string]int),
+		volumes:           make(map[string]int),
+		mutes:             make(map[string]bool),
+		knownSpeakers:     make(map[string]bool),
+		connectedSpeakers: make(map[string]bool),
+		watchdogRestarts:  make(map[string]time.Time),
+		spawn:             defaultSpawn,
+		mode:              ModeStandalone,
 	}
 	for _, o := range opts {
 		o(s)
+	}
+	// Resolve hostname as a last-resort name — covers callers that omit WithName
+	// (e.g. tests and programmatic use). main.go passes defaultName() via WithName,
+	// so this branch fires only when WithName is absent or explicitly set to "".
+	if s.name == "" {
+		if h, err := os.Hostname(); err == nil {
+			s.name = h
+		}
 	}
 	if s.stateFile != "" {
 		s.loadState()

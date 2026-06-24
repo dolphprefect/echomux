@@ -21,9 +21,11 @@ type MockController struct {
 	snapshotErr  error
 	volumeErr    error
 	muteErr      error
-	rtpModuleID  int
-	rtpAddErr    error
-	rtpRemoveErr error
+	rtpModuleID    int
+	rtpAddErr      error
+	rtpRemoveErr   error
+	rtpAddCalls    int
+	rtpLastRemoved int
 }
 
 func NewMockController(sinks []Node) *MockController {
@@ -237,13 +239,29 @@ func (c *MockController) SetRTPRemoveErr(err error) {
 func (c *MockController) AddRTPSink(_ context.Context, _ string, _ int) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.rtpAddCalls++
 	return c.rtpModuleID, c.rtpAddErr
 }
 
-func (c *MockController) RemoveRTPSink(_ context.Context, _ int) error {
+func (c *MockController) RemoveRTPSink(_ context.Context, moduleID int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.rtpLastRemoved = moduleID
 	return c.rtpRemoveErr
+}
+
+// RTPAddCalls returns the number of times AddRTPSink was called.
+func (c *MockController) RTPAddCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rtpAddCalls
+}
+
+// LastRTPRemoveID returns the module ID from the most recent RemoveRTPSink call.
+func (c *MockController) LastRTPRemoveID() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rtpLastRemoved
 }
 
 func (c *MockController) Linked(dstID int) bool {

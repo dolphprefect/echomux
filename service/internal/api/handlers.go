@@ -31,6 +31,11 @@ type server struct {
 	mode       Mode
 	name       string
 	masterAddr string
+	rtpPort    int
+
+	nodes             *nodeRegistry
+	heartbeatInterval time.Duration
+	pongTimeout       time.Duration
 
 	mu                sync.Mutex
 	stateMu           sync.Mutex               // serialises saveState writes to disk
@@ -64,6 +69,15 @@ func WithDebug(debug bool) Option       { return func(s *server) { s.debug = deb
 func WithMode(m Mode) Option            { return func(s *server) { s.mode = m } }
 func WithName(n string) Option          { return func(s *server) { s.name = n } }
 func WithMasterAddr(addr string) Option { return func(s *server) { s.masterAddr = addr } }
+func WithRTPPort(port int) Option       { return func(s *server) { s.rtpPort = port } }
+
+// WithHeartbeat overrides the default heartbeat intervals — intended for tests.
+func WithHeartbeat(interval, pongTimeout time.Duration) Option {
+	return func(s *server) {
+		s.heartbeatInterval = interval
+		s.pongTimeout = pongTimeout
+	}
+}
 
 // WithKnownSpeakers pre-seeds the knownSpeakers set — intended for tests.
 func WithKnownSpeakers(macs ...string) Option {
@@ -88,6 +102,9 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 		watchdogRestarts:  make(map[string]time.Time),
 		spawn:             defaultSpawn,
 		mode:              ModeStandalone,
+		rtpPort:           9001,
+		heartbeatInterval: 10 * time.Second,
+		pongTimeout:       5 * time.Second,
 	}
 	for _, o := range opts {
 		o(s)
@@ -99,6 +116,9 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 		if h, err := os.Hostname(); err == nil {
 			s.name = h
 		}
+	}
+	if s.mode == ModeMaster {
+		s.nodes = newNodeRegistry()
 	}
 	if s.stateFile != "" {
 		s.loadState()
@@ -236,6 +256,7 @@ func (w *statusWriter) WriteHeader(code int) {
 func (s *server) routes() {
 	mux := s.mux
 	mux.Handle("/", staticHandler())
+	mux.HandleFunc("GET /nodes", s.handleNodes)
 	mux.HandleFunc("GET /devices", s.handleGetDevices)
 	mux.HandleFunc("POST /scan", s.handleScan)
 	mux.HandleFunc("POST /devices/{mac}/connect", s.handleConnect)
@@ -287,10 +308,11 @@ func (s *server) nodeIDForMAC(ctx context.Context, mac string) (int, error) {
 
 type deviceInfo struct {
 	bluetooth.Device
-	DelayMs int  `json:"delay_ms"`
-	Volume  int  `json:"volume"`
-	Muted   bool `json:"muted"`
-	Playing bool `json:"playing"`
+	NodeID  string `json:"node_id,omitempty"`
+	DelayMs int    `json:"delay_ms"`
+	Volume  int    `json:"volume"`
+	Muted   bool   `json:"muted"`
+	Playing bool   `json:"playing"`
 }
 
 func (s *server) handleGetDevices(w http.ResponseWriter, r *http.Request) {
@@ -338,6 +360,25 @@ func (s *server) handleGetDevices(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			out[idx].Volume = -1 // PipeWire node not yet created
+		}
+	}
+	// In master mode, stamp local devices with the master's node_id and append
+	// satellite devices from the in-memory registry cache.
+	if s.mode == ModeMaster {
+		masterNodeID := slugify(s.name)
+		for i := range out {
+			out[i].NodeID = masterNodeID
+		}
+		if s.nodes != nil {
+			for _, n := range s.nodes.list() {
+				if !n.Online || n.Devices == nil {
+					continue
+				}
+				for _, d := range n.Devices {
+					d.NodeID = n.ID
+					out = append(out, d)
+				}
+			}
 		}
 	}
 	if out == nil {

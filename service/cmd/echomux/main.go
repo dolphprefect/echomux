@@ -45,9 +45,10 @@ func main() {
 	stateFile  := flag.String("state-file",  envOr("ECHOMUX_STATE_FILE",  defaultStateFile()), "path to state JSON file")
 	tlsCert    := flag.String("tls-cert",    envOr("ECHOMUX_TLS_CERT",    ""),                 "TLS certificate path (enables HTTPS)")
 	tlsKey     := flag.String("tls-key",     envOr("ECHOMUX_TLS_KEY",     ""),                 "TLS private key path")
-	modeStr    := flag.String("mode",        envOr("ECHOMUX_MODE",        "standalone"),        "operating mode: standalone | master | satellite")
-	name       := flag.String("name",        envOr("ECHOMUX_NAME",        defaultName()),       "node display name shown in the UI")
-	masterAddr := flag.String("master-addr", envOr("ECHOMUX_MASTER_ADDR", ""),                  "satellite only: host:port of the master echomux")
+	modeStr    := flag.String("mode",        envOr("ECHOMUX_MODE",        "standalone"),  "operating mode: standalone | master | satellite")
+	name       := flag.String("name",        envOr("ECHOMUX_NAME",        defaultName()), "node display name shown in the UI")
+	masterAddr := flag.String("master-addr", envOr("ECHOMUX_MASTER_ADDR", ""),            "satellite only: host:port of the master echomux")
+	rtpPort    := flag.Int("rtp-port",       9001,                                         "master only: UDP port for RTP unicast to satellites (must match satellite pipewire config)")
 	flag.Parse()
 
 	mode, err := api.ParseMode(*modeStr)
@@ -77,6 +78,7 @@ func main() {
 		api.WithMode(mode),
 		api.WithName(*name),
 		api.WithMasterAddr(*masterAddr),
+		api.WithRTPPort(*rtpPort),
 	)
 
 	httpSrv := &http.Server{Addr: *addr, Handler: srv}

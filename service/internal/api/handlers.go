@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -28,6 +30,17 @@ type server struct {
 	hub   *hub
 	mux   *http.ServeMux
 
+	mode       Mode
+	name       string
+	masterAddr string
+	selfAddr   string // satellite only: public host:port reported in register message
+	clientCtx  context.Context
+	rtpPort    int
+
+	nodes             *nodeRegistry
+	heartbeatInterval time.Duration
+	pongTimeout       time.Duration
+
 	mu                sync.Mutex
 	stateMu           sync.Mutex               // serialises saveState writes to disk
 	speakers             map[string]*speakerState // MAC → active loopback
@@ -43,6 +56,8 @@ type server struct {
 	debug             bool
 	saveTimerMu       sync.Mutex
 	saveTimer         *time.Timer              // debounces rapid saveState calls
+	satPushCh         chan struct{}
+	proxyTransport    *http.Transport
 }
 
 func (s *server) dbg(format string, args ...any) {
@@ -54,9 +69,27 @@ func (s *server) dbg(format string, args ...any) {
 // Option configures a server.
 type Option func(*server)
 
-func WithStateFile(path string) Option { return func(s *server) { s.stateFile = path } }
-func WithSpawn(fn SpawnFn) Option      { return func(s *server) { s.spawn = fn } }
-func WithDebug(debug bool) Option      { return func(s *server) { s.debug = debug } }
+func WithStateFile(path string) Option      { return func(s *server) { s.stateFile = path } }
+func WithSpawn(fn SpawnFn) Option           { return func(s *server) { s.spawn = fn } }
+func WithDebug(debug bool) Option           { return func(s *server) { s.debug = debug } }
+func WithMode(m Mode) Option                { return func(s *server) { s.mode = m } }
+func WithName(n string) Option              { return func(s *server) { s.name = n } }
+func WithMasterAddr(addr string) Option     { return func(s *server) { s.masterAddr = addr } }
+func WithRTPPort(port int) Option           { return func(s *server) { s.rtpPort = port } }
+func WithSelfAddr(addr string) Option       { return func(s *server) { s.selfAddr = addr } }
+
+// WithClientContext provides a context for the satellite client goroutine.
+// The satellite client is only started when this option is set and mode is satellite.
+// Pass the application's signal context from main; pass a test-cancellable context in tests.
+func WithClientContext(ctx context.Context) Option { return func(s *server) { s.clientCtx = ctx } }
+
+// WithHeartbeat overrides the default heartbeat intervals — intended for tests.
+func WithHeartbeat(interval, pongTimeout time.Duration) Option {
+	return func(s *server) {
+		s.heartbeatInterval = interval
+		s.pongTimeout = pongTimeout
+	}
+}
 
 // WithKnownSpeakers pre-seeds the knownSpeakers set — intended for tests.
 func WithKnownSpeakers(macs ...string) Option {
@@ -69,20 +102,52 @@ func WithKnownSpeakers(macs ...string) Option {
 
 func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) http.Handler {
 	s := &server{
-		bt:               bt,
-		audio:            audio,
-		hub:              newHub(),
-		speakers:         make(map[string]*speakerState),
-		delays:           make(map[string]int),
-		volumes:          make(map[string]int),
-		mutes:            make(map[string]bool),
-		knownSpeakers:       make(map[string]bool),
-		connectedSpeakers:   make(map[string]bool),
-		watchdogRestarts: make(map[string]time.Time),
-		spawn:            defaultSpawn,
+		bt:                bt,
+		audio:             audio,
+		hub:               newHub(),
+		speakers:          make(map[string]*speakerState),
+		delays:            make(map[string]int),
+		volumes:           make(map[string]int),
+		mutes:             make(map[string]bool),
+		knownSpeakers:     make(map[string]bool),
+		connectedSpeakers: make(map[string]bool),
+		watchdogRestarts:  make(map[string]time.Time),
+		spawn:             defaultSpawn,
+		mode:              ModeStandalone,
+		rtpPort:           9001,
+		heartbeatInterval: 10 * time.Second,
+		pongTimeout:       5 * time.Second,
+		satPushCh:         make(chan struct{}, 1),
+		proxyTransport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   2,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: 5 * time.Second,
+		},
 	}
 	for _, o := range opts {
 		o(s)
+	}
+	// Resolve hostname as a last-resort name — covers callers that omit WithName
+	// (e.g. tests and programmatic use). main.go passes defaultName() via WithName,
+	// so this branch fires only when WithName is absent or explicitly set to "".
+	if s.name == "" {
+		if h, err := os.Hostname(); err == nil {
+			s.name = h
+		}
+	}
+	if s.mode == ModeMaster {
+		s.nodes = newNodeRegistry()
+		if err := s.audio.CleanOrphanRTPModules(context.Background(), s.rtpPort); err != nil {
+			log.Printf("failed to clean orphan RTP modules: %v", err)
+		}
 	}
 	if s.stateFile != "" {
 		s.loadState()
@@ -91,6 +156,9 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 	s.routes()
 	go s.hub.RunEventForwarder(context.Background(), bt.Events())
 	s.startAutoRouter(context.Background(), 2*time.Second)
+	if s.mode == ModeSatellite && s.masterAddr != "" && s.clientCtx != nil {
+		go s.runSatelliteClient(s.clientCtx)
+	}
 	go s.startupConnect(context.Background())
 	return s.mux
 }
@@ -191,6 +259,16 @@ func (s *server) saveStateDebounced() {
 	s.saveTimerMu.Unlock()
 }
 
+func (s *server) triggerSatellitePush() {
+	if s.mode != ModeSatellite {
+		return
+	}
+	select {
+	case s.satPushCh <- struct{}{}:
+	default:
+	}
+}
+
 func copyIntMap(m map[string]int) map[string]int {
 	cp := make(map[string]int, len(m))
 	for k, v := range m {
@@ -217,9 +295,21 @@ func (w *statusWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.ResponseWriter.(http.Hijacker).Hijack()
+}
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (s *server) routes() {
 	mux := s.mux
 	mux.Handle("/", staticHandler())
+	mux.HandleFunc("GET /nodes", s.handleNodes)
+	mux.HandleFunc("/nodes/{id}/", s.handleNodeProxy)
 	mux.HandleFunc("GET /devices", s.handleGetDevices)
 	mux.HandleFunc("POST /scan", s.handleScan)
 	mux.HandleFunc("POST /devices/{mac}/connect", s.handleConnect)
@@ -271,10 +361,11 @@ func (s *server) nodeIDForMAC(ctx context.Context, mac string) (int, error) {
 
 type deviceInfo struct {
 	bluetooth.Device
-	DelayMs int  `json:"delay_ms"`
-	Volume  int  `json:"volume"`
-	Muted   bool `json:"muted"`
-	Playing bool `json:"playing"`
+	NodeID  string `json:"node_id,omitempty"`
+	DelayMs int    `json:"delay_ms"`
+	Volume  int    `json:"volume"`
+	Muted   bool   `json:"muted"`
+	Playing bool   `json:"playing"`
 }
 
 func (s *server) handleGetDevices(w http.ResponseWriter, r *http.Request) {
@@ -316,12 +407,31 @@ func (s *server) handleGetDevices(w http.ResponseWriter, r *http.Request) {
 		for _, idx := range pendingIdxs {
 			mac := out[idx].MAC
 			if nodeID, ok := nodeByMAC[mac]; ok {
-				if v, err := s.audio.GetVolume(r.Context(), nodeID); err == nil && v > 0 {
+				if v, err := s.audio.GetVolume(r.Context(), nodeID); err == nil && v >= 0 {
 					out[idx].Volume = v
 					continue
 				}
 			}
 			out[idx].Volume = -1 // PipeWire node not yet created
+		}
+	}
+	// In master mode, stamp local devices with the master's node_id and append
+	// satellite devices from the in-memory registry cache.
+	if s.mode == ModeMaster {
+		masterNodeID := slugify(s.name)
+		for i := range out {
+			out[i].NodeID = masterNodeID
+		}
+		if s.nodes != nil {
+			for _, n := range s.nodes.list() {
+				if !n.Online || n.Devices == nil {
+					continue
+				}
+				for _, d := range n.Devices {
+					d.NodeID = n.ID
+					out = append(out, d)
+				}
+			}
 		}
 	}
 	if out == nil {
@@ -373,6 +483,15 @@ func (s *server) handleScan(w http.ResponseWriter, r *http.Request) {
 	})
 	defer stop()
 
+	// Flush 200 + headers before the scan so reverse proxies with a short
+	// ResponseHeaderTimeout (e.g. the master's node proxy) don't time out
+	// waiting for headers while the scan is running.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
 	s.dbg("scan: starting %ds scan (paused loopbacks for %v)", body.TimeoutSec, activeMacs)
 	scanErr := s.bt.Scan(r.Context(), time.Duration(body.TimeoutSec)*time.Second)
 	s.dbg("scan: finished, err=%v", scanErr)
@@ -382,13 +501,18 @@ func (s *server) handleScan(w http.ResponseWriter, r *http.Request) {
 	// scan sheet closes). This avoids races between the reconnect goroutine
 	// and any subsequent pair/connect calls the client may make.
 
+	type scanResult struct {
+		Devices []bluetooth.Device `json:"devices"`
+		Error   string             `json:"error,omitempty"`
+	}
+
 	if scanErr != nil {
 		// Unpause immediately on error: the context.AfterFunc callback only fires on
 		// client disconnect, not on a scan failure while the connection is still open.
 		s.mu.Lock()
 		s.paused = false
 		s.mu.Unlock()
-		http.Error(w, scanErr.Error(), http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(scanResult{Devices: []bluetooth.Device{}, Error: scanErr.Error()})
 		return
 	}
 	devs, err := s.bt.Devices(r.Context())
@@ -396,11 +520,10 @@ func (s *server) handleScan(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.paused = false
 		s.mu.Unlock()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(scanResult{Devices: []bluetooth.Device{}, Error: err.Error()})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(devs)
+	json.NewEncoder(w).Encode(scanResult{Devices: devs})
 }
 
 func (s *server) handleConnect(w http.ResponseWriter, r *http.Request) {
@@ -583,6 +706,7 @@ func (s *server) handleForget(w http.ResponseWriter, r *http.Request) {
 	delete(s.watchdogRestarts, mac)
 	s.mu.Unlock()
 	s.saveStateDebounced()
+	s.triggerSatellitePush()
 
 	// Best-effort disconnect before removing from BlueZ.
 	_ = s.bt.Disconnect(r.Context(), mac)
@@ -645,6 +769,7 @@ func (s *server) handleVolume(w http.ResponseWriter, r *http.Request) {
 	s.volumes[mac] = body.Level
 	s.mu.Unlock()
 	s.saveStateDebounced()
+	s.triggerSatellitePush()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -689,6 +814,7 @@ func (s *server) handleMute(w http.ResponseWriter, r *http.Request) {
 	s.mutes[mac] = body.Muted
 	s.mu.Unlock()
 	s.saveStateDebounced()
+	s.triggerSatellitePush()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -724,6 +850,7 @@ func (s *server) handleDelay(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	s.saveStateDebounced()
+	s.triggerSatellitePush()
 	w.WriteHeader(http.StatusNoContent)
 }
 

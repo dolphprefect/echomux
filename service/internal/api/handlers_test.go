@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +20,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func mustReadBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	b, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(bytes.TrimSpace(b))
+}
 
 func newTestServer(t *testing.T) (*httptest.Server, *bluetooth.MockManager, *audio.MockController) {
 	t.Helper()
@@ -82,9 +90,13 @@ func TestPostScan(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var devs []map[string]any
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&devs))
-	assert.NotEmpty(t, devs)
+	var result struct {
+		Devices []map[string]any `json:"devices"`
+		Error   string           `json:"error"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Empty(t, result.Error)
+	assert.NotEmpty(t, result.Devices)
 }
 
 func TestPostConnect(t *testing.T) {
@@ -403,7 +415,35 @@ func TestGetDevices_PendingVolumeResolution(t *testing.T) {
 
 	nodes := []audio.Node{{ID: 42, MAC: "AA:BB:CC:DD:EE:FF", Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"}}
 	audioCtr := audio.NewMockController(nodes)
-	// Explicitly set volume to 0 so GetVolume is queried for this node.
+	// Inject error to GetVolume() call to simulate unavailable volume.
+	audioCtr.SetGetVolumeErr(errors.New("PipeWire volume query failed"))
+
+	noop := func(nodeName string, _ int) *exec.Cmd { return exec.Command("true") }
+	srv := api.NewServer(btMgr, audioCtr,
+		api.WithSpawn(noop),
+		api.WithKnownSpeakers("AA:BB:CC:DD:EE:FF"),
+	)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	// MockController.GetVolume returns an error, so handleGetDevices should
+	// mark volume as -1.
+	resp, err := http.Get(ts.URL + "/devices")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var devs []map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&devs))
+	require.Len(t, devs, 1)
+	assert.Equal(t, float64(-1), devs[0]["volume"])
+}
+
+func TestGetDevices_VolumeZeroResolution(t *testing.T) {
+	btMgr := bluetooth.NewMockManager()
+	btMgr.AddDevice(bluetooth.Device{MAC: "AA:BB:CC:DD:EE:FF", Name: "Speaker A", Paired: true})
+
+	nodes := []audio.Node{{ID: 42, MAC: "AA:BB:CC:DD:EE:FF", Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"}}
+	audioCtr := audio.NewMockController(nodes)
+	// Explicitly set volume to 0 so MockController returns 0.
 	audioCtr.SetVolume(context.Background(), 42, 0) //nolint
 
 	noop := func(nodeName string, _ int) *exec.Cmd { return exec.Command("true") }
@@ -414,16 +454,14 @@ func TestGetDevices_PendingVolumeResolution(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	// MockController.GetVolume returns 0 (not stored), so handleGetDevices should
-	// mark volume as -1 (PW node volume unavailable/zero).
+	// GetVolume returns 0, so handleGetDevices should resolve the volume to 0.
 	resp, err := http.Get(ts.URL + "/devices")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	var devs []map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&devs))
 	require.Len(t, devs, 1)
-	// volume == 0 triggers pending path; mock returns 0 (not > 0) so result is -1
-	assert.Equal(t, float64(-1), devs[0]["volume"])
+	assert.Equal(t, float64(0), devs[0]["volume"])
 }
 
 func TestGetDevices_NodesErrorOnPendingVolume(t *testing.T) {
@@ -466,7 +504,11 @@ func TestGetDevices_DevicesError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
-func TestPostScan_DevicesErrAfterScan(t *testing.T) {
+// TestPostScan_DevicesError_Returns200Empty verifies that a Devices() failure
+// after a successful scan returns 200 with an empty array, not a 5xx.
+// POST /scan commits to 200 before the scan starts so reverse proxies see
+// response headers immediately; errors cannot change the status after that.
+func TestPostScan_DevicesError_Returns200Empty(t *testing.T) {
 	ts, btMgr, _ := newTestServer(t)
 	defer ts.Close()
 
@@ -476,7 +518,11 @@ func TestPostScan_DevicesErrAfterScan(t *testing.T) {
 	resp, err := http.Post(ts.URL+"/scan", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(mustReadBody(t, resp)), &got))
+	assert.Empty(t, got["devices"])
+	assert.NotEmpty(t, got["error"])
 }
 
 // TestPostConnect_TransientErrRetries verifies that a transient Connect error
@@ -711,7 +757,11 @@ func TestGetDevices_ExcludesNonKnownSpeakers(t *testing.T) {
 	}
 }
 
-func TestPostScan_ScanError(t *testing.T) {
+// TestPostScan_ScanError_Returns200Empty verifies that a Scan() failure returns
+// 200 with an empty array, not a 5xx. POST /scan commits to 200 before the
+// scan starts so reverse proxies see response headers immediately; errors
+// cannot change the status after that.
+func TestPostScan_ScanError_Returns200Empty(t *testing.T) {
 	ts, btMgr, _ := newTestServer(t)
 	defer ts.Close()
 
@@ -721,7 +771,11 @@ func TestPostScan_ScanError(t *testing.T) {
 	resp, err := http.Post(ts.URL+"/scan", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(mustReadBody(t, resp)), &got))
+	assert.Empty(t, got["devices"])
+	assert.NotEmpty(t, got["error"])
 }
 
 func TestPostScan_DefaultTimeout(t *testing.T) {

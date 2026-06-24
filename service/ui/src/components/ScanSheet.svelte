@@ -3,18 +3,20 @@
   import { api } from '../lib/api.js'
 
   export let knownMACs = new Set()
+  export let nodeId = null
 
   const dispatch = createEventDispatcher()
 
   let busy = true
   let results = []
+  let scanError = null
   let adding = {}      // MAC → 'loading' | 'done' | 'error'
   let prevConnected = []
 
   onMount(async () => {
     // Capture who was connected before the scan pauses them.
     try {
-      const devs = await api('GET', '/devices')
+      const devs = await api('GET', '/devices', undefined, nodeId)
       prevConnected = devs.filter(d => d.Connected)
     } catch(e) {}
     await startScan()
@@ -23,12 +25,17 @@
   async function startScan() {
     busy = true
     results = []
+    scanError = null
     adding = {}
     try {
-      const all = await api('POST', '/scan', { timeout_sec: 10 })
-      results = all.filter(d => !knownMACs.has(d.MAC))
+      const resp = await api('POST', '/scan', { timeout_sec: 10 }, nodeId)
+      if (resp.error) {
+        scanError = resp.error
+      } else {
+        results = (resp.devices || []).filter(d => !knownMACs.has(d.MAC))
+      }
     } catch(e) {
-      results = []
+      scanError = e.message || 'Scan failed'
     }
     busy = false
   }
@@ -36,8 +43,8 @@
   async function addDevice(mac) {
     adding = { ...adding, [mac]: 'loading' }
     try {
-      await api('POST', `/devices/${mac}/pair`)
-      await api('POST', `/devices/${mac}/connect`)
+      await api('POST', `/devices/${mac}/pair`, undefined, nodeId)
+      await api('POST', `/devices/${mac}/connect`, undefined, nodeId)
       const updated = { ...adding, [mac]: 'done' }
       adding = updated
       // Only auto-close when no other adds are still in-flight.
@@ -71,7 +78,11 @@
         Scanning&hellip;
       </div>
     {:else}
-      {#if results.length === 0}
+      {#if scanError}
+        <p class="scan-status scan-error">
+          Scan failed: {scanError}
+        </p>
+      {:else if results.length === 0}
         <p class="scan-status">
           No new speakers found.<br>Make sure it's in pairing mode.
         </p>

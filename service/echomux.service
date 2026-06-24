@@ -1,7 +1,8 @@
 [Unit]
 Description=echomux — Bluetooth multi-room audio broadcaster
-After=bluetooth.service pipewire-system.service wireplumber-system.service
+After=bluetooth.service pipewire-system.service wireplumber-system.service pipewire-pulse-system.socket
 Wants=pipewire-system.service wireplumber-system.service
+Requires=pipewire-pulse-system.socket
 
 [Service]
 Type=simple

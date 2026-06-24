@@ -15,9 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestHandleScan_UnpausesOnScanError verifies that s.paused is reset to false
-// when Scan() itself returns an error (not just the subsequent Devices() call).
-func TestHandleScan_UnpausesOnScanError(t *testing.T) {
+// TestHandleScan_ScanError_UnpausesAndReturnsEmpty verifies that when Scan()
+// fails the server unpauses and the response is 200 with an empty array.
+// POST /scan flushes 200 before the scan starts (so reverse proxies with short
+// ResponseHeaderTimeout don't time out), which means errors cannot change the
+// status code — they are signalled by returning [] instead of a device list.
+func TestHandleScan_ScanError_UnpausesAndReturnsEmpty(t *testing.T) {
 	btMgr := bluetooth.NewMockManager()
 	btMgr.SetScanErr(errors.New("hci0 down"))
 
@@ -42,7 +45,11 @@ func TestHandleScan_UnpausesOnScanError(t *testing.T) {
 
 	s.handleScan(w, req)
 
-	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(w.Body.String()), &got))
+	assert.Empty(t, got["devices"], "devices must be empty on error")
+	assert.NotEmpty(t, got["error"], "error field must be set on scan failure")
 	s.mu.Lock()
 	paused := s.paused
 	s.mu.Unlock()
@@ -85,10 +92,10 @@ func TestHandleScan_StaysPausedAfterSuccess(t *testing.T) {
 	assert.True(t, paused, "server must remain paused after a successful scan")
 }
 
-// TestHandleScan_UnpausesOnDevicesError verifies that s.paused is reset to
-// false when Devices() fails after a successful scan. Without the fix, the
-// server would be stuck paused indefinitely.
-func TestHandleScan_UnpausesOnDevicesError(t *testing.T) {
+// TestHandleScan_DevicesError_UnpausesAndReturnsEmpty verifies that when
+// Devices() fails after a successful scan the server unpauses and returns 200
+// with an empty array (same early-flush contract as the scan-error case).
+func TestHandleScan_DevicesError_UnpausesAndReturnsEmpty(t *testing.T) {
 	btMgr := bluetooth.NewMockManager()
 	btMgr.AddDevice(bluetooth.Device{MAC: "AA:BB:CC:DD:EE:FF", Name: "Speaker A"})
 	btMgr.SetDevicesErr(errors.New("bluez crashed"))
@@ -114,7 +121,11 @@ func TestHandleScan_UnpausesOnDevicesError(t *testing.T) {
 
 	s.handleScan(w, req)
 
-	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(w.Body.String()), &got))
+	assert.Empty(t, got["devices"], "devices must be empty on error")
+	assert.NotEmpty(t, got["error"], "error field must be set on devices failure")
 	s.mu.Lock()
 	paused := s.paused
 	s.mu.Unlock()

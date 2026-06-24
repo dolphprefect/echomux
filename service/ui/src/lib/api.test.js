@@ -75,4 +75,18 @@ describe('api()', () => {
       body: '{"level":80}',
     })
   })
+
+  it('prepends proxy prefix when nodeId is specified', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => '' },
+    })
+    global.fetch = mockFetch
+    await api('POST', '/devices/AA:BB/connect', undefined, 'kitchen')
+    expect(mockFetch).toHaveBeenCalledWith('/nodes/kitchen/devices/AA:BB/connect', {
+      method: 'POST',
+      headers: {},
+    })
+  })
 })

@@ -179,16 +179,29 @@ RestartSec=2
 WantedBy=multi-user.target
 EOF
 
+cat > /etc/systemd/system/pipewire-pulse-system.socket << EOF
+[Unit]
+Description=PipeWire PulseAudio Compatibility System Socket
+
+[Socket]
+ListenStream=/run/pipewire/pulse-native
+DirectoryMode=0755
+
+[Install]
+WantedBy=sockets.target
+EOF
+
 cat > /etc/systemd/system/pipewire-pulse-system.service << EOF
 [Unit]
 Description=PipeWire PulseAudio Compatibility
 After=pipewire-system.service
-Requires=pipewire-system.service
+Requires=pipewire-system.service pipewire-pulse-system.socket
 
 [Service]
 User=$SERVICE_USER
 Group=audio
 Environment=PIPEWIRE_RUNTIME_DIR=/run/pipewire
+Environment=PULSE_RUNTIME_PATH=/run/pipewire
 ExecStart=/usr/bin/pipewire-pulse
 Restart=on-failure
 RestartSec=2
@@ -219,6 +232,7 @@ echo "==> Enabling and starting system audio services..."
 systemctl daemon-reload
 systemctl enable --now pipewire-system.service
 systemctl enable --now wireplumber-system.service
+systemctl enable --now pipewire-pulse-system.socket
 systemctl enable --now pipewire-pulse-system.service
 
 # ---------------------------------------------------------------------------
@@ -294,28 +308,42 @@ systemctl enable --now avahi-daemon
 #     the available libc6-dev. raspotify ships a pre-built ARM64 librespot
 #     binary that works on all supported hardware.
 # ---------------------------------------------------------------------------
-RASPOTIFY_VER="0.48.1"
-LIBRESPOT_VER="v0.8.0-ea81314"
-RASPOTIFY_DEB="raspotify_${RASPOTIFY_VER}.librespot.${LIBRESPOT_VER}_arm64.deb"
-RASPOTIFY_URL="https://github.com/dtcooper/raspotify/releases/download/${RASPOTIFY_VER}/${RASPOTIFY_DEB}"
+# Detect mode from environment or existing config file
+MODE="${ECHOMUX_MODE:-}"
+if [[ -z "$MODE" && -f /etc/echomux/echomux.conf ]]; then
+    MODE=$(grep -oP '^[^#]*ECHOMUX_MODE=\s*\K[a-zA-Z0-9_-]+' /etc/echomux/echomux.conf || echo "")
+fi
 
-echo "==> Downloading pre-built librespot from raspotify ${RASPOTIFY_VER}..."
-curl -L -o "/tmp/${RASPOTIFY_DEB}" "${RASPOTIFY_URL}"
-dpkg-deb -x "/tmp/${RASPOTIFY_DEB}" /tmp/raspotify-extract
-install -m 755 /tmp/raspotify-extract/usr/bin/librespot /usr/local/bin/librespot
-rm -rf "/tmp/${RASPOTIFY_DEB}" /tmp/raspotify-extract
+if [[ "$MODE" == "satellite" ]]; then
+    echo "==> Satellite mode detected ($MODE). Skipping librespot installation."
+    if systemctl is-enabled librespot.service &>/dev/null || systemctl is-active librespot.service &>/dev/null; then
+        echo "==> Stopping and disabling librespot.service..."
+        systemctl disable --now librespot.service || true
+    fi
+else
+    RASPOTIFY_VER="0.48.1"
+    LIBRESPOT_VER="v0.8.0-ea81314"
+    RASPOTIFY_DEB="raspotify_${RASPOTIFY_VER}.librespot.${LIBRESPOT_VER}_arm64.deb"
+    RASPOTIFY_URL="https://github.com/dtcooper/raspotify/releases/download/${RASPOTIFY_VER}/${RASPOTIFY_DEB}"
 
-echo "==> Installing librespot-pipewire.sh wrapper..."
-curl -fsSL "${RAW_BASE}/service/setup/librespot-pipewire.sh" \
-    > /usr/local/bin/librespot-pipewire.sh
-chmod +x /usr/local/bin/librespot-pipewire.sh
+    echo "==> Downloading pre-built librespot from raspotify ${RASPOTIFY_VER}..."
+    curl -L -o "/tmp/${RASPOTIFY_DEB}" "${RASPOTIFY_URL}"
+    dpkg-deb -x "/tmp/${RASPOTIFY_DEB}" /tmp/raspotify-extract
+    install -m 755 /tmp/raspotify-extract/usr/bin/librespot /usr/local/bin/librespot
+    rm -rf "/tmp/${RASPOTIFY_DEB}" /tmp/raspotify-extract
 
-echo "==> Installing librespot.service..."
-curl -fsSL "${RAW_BASE}/service/setup/librespot.service" \
-    | sed "s/REPLACE_USER/$SERVICE_USER/" \
-    > /etc/systemd/system/librespot.service
-systemctl daemon-reload
-systemctl enable --now librespot.service
+    echo "==> Installing librespot-pipewire.sh wrapper..."
+    curl -fsSL "${RAW_BASE}/service/setup/librespot-pipewire.sh" \
+        > /usr/local/bin/librespot-pipewire.sh
+    chmod +x /usr/local/bin/librespot-pipewire.sh
+
+    echo "==> Installing librespot.service..."
+    curl -fsSL "${RAW_BASE}/service/setup/librespot.service" \
+        | sed "s/REPLACE_USER/$SERVICE_USER/" \
+        > /etc/systemd/system/librespot.service
+    systemctl daemon-reload
+    systemctl enable --now librespot.service
+fi
 
 # ---------------------------------------------------------------------------
 # 14. Clean up stale WirePlumber stream-properties
@@ -330,5 +358,9 @@ echo "    After reboot, echomux starts automatically."
 echo ""
 echo "    Config file:  /etc/echomux/echomux.conf"
 echo "    To check status:"
-echo "      systemctl status pipewire-system wireplumber-system echomux librespot"
+if [[ "$MODE" == "satellite" ]]; then
+    echo "      systemctl status pipewire-system wireplumber-system echomux"
+else
+    echo "      systemctl status pipewire-system wireplumber-system echomux librespot"
+fi
 echo "      PIPEWIRE_RUNTIME_DIR=/run/pipewire wpctl status"

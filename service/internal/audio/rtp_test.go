@@ -96,3 +96,21 @@ func TestParseModuleID(t *testing.T) {
 		})
 	}
 }
+
+func TestParseOrphanRTPModules(t *testing.T) {
+	output := `0 module-device-restore
+14 module-rtp-send source=main-mix.monitor destination_ip=192.168.1.51 port=9001 format=s16be channels=2 rate=48000
+15 module-rtp-send source=main-mix.monitor destination_ip=192.168.1.52 port=9002 format=s16be channels=2 rate=48000
+16 module-rtp-send source=main-mix.monitor destination_ip=192.168.1.53 port=9001 format=s16be channels=2 rate=48000
+`
+	got := parseOrphanRTPModules([]byte(output), 9001)
+	want := []int{14, 16}
+	if len(got) != len(want) {
+		t.Fatalf("got len %d, want %d", len(got), len(want))
+	}
+	for i, v := range got {
+		if v != want[i] {
+			t.Fatalf("got[%d]=%d, want %d", i, v, want[i])
+		}
+	}
+}

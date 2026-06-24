@@ -25,8 +25,10 @@ type MockController struct {
 	rtpModuleID    int
 	rtpAddErr      error
 	rtpRemoveErr   error
-	rtpAddCalls    int
-	rtpLastRemoved int
+	rtpAddCalls      int
+	rtpLastRemoved   int
+	cleanOrphanCalls int
+	cleanOrphanErr   error
 }
 
 func NewMockController(sinks []Node) *MockController {
@@ -297,4 +299,23 @@ func (c *MockController) Muted(nodeID int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.mutes[nodeID]
+}
+
+func (c *MockController) SetCleanOrphanErr(err error) {
+	c.mu.Lock()
+	c.cleanOrphanErr = err
+	c.mu.Unlock()
+}
+
+func (c *MockController) CleanOrphanRTPModules(_ context.Context, _ int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cleanOrphanCalls++
+	return c.cleanOrphanErr
+}
+
+func (c *MockController) CleanOrphanCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cleanOrphanCalls
 }

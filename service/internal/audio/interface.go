@@ -48,6 +48,8 @@ type Controller interface {
 	AddRTPSink(ctx context.Context, destIP string, port int) (int, error)
 	// RemoveRTPSink unloads the module-rtp-send module with the given ID via pactl.
 	RemoveRTPSink(ctx context.Context, moduleID int) error
+	// CleanOrphanRTPModules unloads all module-rtp-send instances matching the target port.
+	CleanOrphanRTPModules(ctx context.Context, rtpPort int) error
 }
 
 type Executor interface {

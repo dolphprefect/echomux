@@ -144,6 +144,9 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 	}
 	if s.mode == ModeMaster {
 		s.nodes = newNodeRegistry()
+		if err := s.audio.CleanOrphanRTPModules(context.Background(), s.rtpPort); err != nil {
+			log.Printf("failed to clean orphan RTP modules: %v", err)
+		}
 	}
 	if s.stateFile != "" {
 		s.loadState()

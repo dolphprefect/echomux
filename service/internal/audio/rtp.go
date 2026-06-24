@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -23,9 +24,13 @@ func runPactl(ctx context.Context, args ...string) ([]byte, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "pactl", args...)
+	pulseServer := os.Getenv("ECHOMUX_PULSE_SERVER")
+	if pulseServer == "" {
+		pulseServer = "unix:/run/pipewire/pulse-native"
+	}
 	cmd.Env = append(os.Environ(),
 		"PIPEWIRE_RUNTIME_DIR=/run/pipewire",
-		"PULSE_SERVER=unix:/run/pipewire/pulse-native",
+		"PULSE_SERVER="+pulseServer,
 	)
 
 	var stdout bytes.Buffer
@@ -88,4 +93,53 @@ func (c *controller) AddRTPSink(ctx context.Context, destIP string, port int) (i
 
 func (c *controller) RemoveRTPSink(ctx context.Context, moduleID int) error {
 	return RemoveRTPSink(ctx, moduleID)
+}
+
+// CleanOrphanRTPModules lists all loaded modules and unloads any module-rtp-send
+// module whose arguments contain port=<rtpPort>.
+func CleanOrphanRTPModules(ctx context.Context, rtpPort int) error {
+	out, err := runPactl(ctx, "list", "modules", "short")
+	if err != nil {
+		return fmt.Errorf("list modules: %w", err)
+	}
+
+	ids := parseOrphanRTPModules(out, rtpPort)
+	for _, id := range ids {
+		log.Printf("CleanOrphanRTPModules: unloading orphan module %d", id)
+		if err := RemoveRTPSink(ctx, id); err != nil {
+			log.Printf("CleanOrphanRTPModules: failed to unload module %d: %v", id, err)
+		}
+	}
+	return nil
+}
+
+func parseOrphanRTPModules(output []byte, rtpPort int) []int {
+	portArg := fmt.Sprintf("port=%d", rtpPort)
+	var ids []int
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		moduleIDStr := fields[0]
+		moduleName := fields[1]
+		if moduleName != "module-rtp-send" {
+			continue
+		}
+		// Check arguments
+		argsStr := strings.Join(fields[2:], " ")
+		if strings.Contains(argsStr, portArg) {
+			moduleID, err := strconv.Atoi(moduleIDStr)
+			if err == nil {
+				ids = append(ids, moduleID)
+			}
+		}
+	}
+	return ids
+}
+
+func (c *controller) CleanOrphanRTPModules(ctx context.Context, rtpPort int) error {
+	return CleanOrphanRTPModules(ctx, rtpPort)
 }

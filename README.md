@@ -12,7 +12,8 @@ Open the web UI on your phone, connect your speakers, and pick **echomux** as th
 - **Spotify Connect** — appears as a device in the Spotify app; no extra app needed
 - **Per-speaker volume and mute**
 - **Per-speaker delay** — compensate for room distance (0–2000 ms) to keep speakers in sync
-- **Mobile-first web UI** — phone-optimised, works in any browser
+- **Multi-node / satellite** — add more Raspberry Pis to reach speakers in distant rooms; all nodes are controlled from a single UI on the master
+- **Mobile-first web UI** — phone-optimised, works in any browser; groups speakers by node when multiple nodes are active
 - **Auto-reconnect** — known speakers reconnect automatically after a reboot
 - **Headless** — no monitor, keyboard, or desktop environment required
 
@@ -66,7 +67,66 @@ After reboot, open `http://<your-pi-ip>:56644` in a browser.
 
 Each speaker card has an independent volume slider and a delay control. Use the delay to keep speakers in different rooms in sync — add delay to the closer speaker to match the travel time to the more distant one.
 
-The **restart button** (↺) in the header kills and respawns all audio loopbacks. Use it if speakers are connected but silent.
+The **restart button** (↺) in the header kills and respawns all audio loopbacks on all nodes. Each node section also has its own restart button for per-node recovery.
+
+---
+
+## Multi-node setup (satellite)
+
+A single Raspberry Pi can only reach speakers within Bluetooth range. To cover multiple rooms, run **satellite** echomux instances on additional Pis. Each satellite connects to the master over Wi-Fi, registers itself, and receives audio via RTP unicast. The master's web UI shows all nodes in grouped sections; speakers are managed on the node they belong to.
+
+### Architecture
+
+```
+                    ┌─────────────────────────────┐
+  Spotify app ──▶  │  MASTER echomux               │
+  (Spotify Connect)│  - librespot + PipeWire        │
+                   │  - web UI (:56644)             │
+                   │  - REST API for all nodes      │
+                   └──────────┬──────────────────┬─┘
+                              │  RTP unicast      │  HTTP proxy
+                     WebSocket│  (UDP 9001)       │  /nodes/{id}/...
+                   ┌──────────▼──────────┐  ┌────▼──────────────────┐
+                   │  SATELLITE echomux  │  │  SATELLITE echomux    │
+                   │  living room        │  │  bedroom               │
+                   │  BT speakers        │  │  BT speakers           │
+                   └─────────────────────┘  └───────────────────────┘
+```
+
+The satellite is a full echomux instance running in `satellite` mode. It has no web UI of its own — the master proxies all API calls to it via `/nodes/{id}/...`.
+
+### Setting up a satellite
+
+**1. Install echomux on the satellite Pi** (same install script as the master).
+
+**2. Create `/etc/echomux/echomux.conf`** on the satellite:
+
+```ini
+ECHOMUX_MODE=satellite
+ECHOMUX_NAME=bedroom
+ECHOMUX_MASTER_ADDR=192.168.1.3:56644
+ECHOMUX_ADAPTER=hci0
+ECHOMUX_ADDR=:56644
+```
+
+`ECHOMUX_NAME` becomes the node label in the UI. `ECHOMUX_MASTER_ADDR` is the master's IP and port.
+
+**3. Restart the satellite service:**
+
+```bash
+sudo systemctl restart echomux
+```
+
+The satellite connects to the master via WebSocket, registers, and appears immediately in the UI under its own section.
+
+### Satellite configuration variables
+
+| Variable | Description |
+|---|---|
+| `ECHOMUX_MODE` | `standalone` (default), `master`, or `satellite` |
+| `ECHOMUX_NAME` | Display name for this node (used as node ID slug) |
+| `ECHOMUX_MASTER_ADDR` | `host:port` of the master — satellite only |
+| `ECHOMUX_SELF_ADDR` | Public `host:port` this satellite reports to the master for HTTP proxy; auto-detected if omitted |
 
 ---
 
@@ -84,6 +144,8 @@ sudo systemctl restart echomux
 | `ECHOMUX_ADDR` | `:56644` | HTTP listen address |
 | `ECHOMUX_SPOTIFY_NAME` | `echomux` | Name shown in the Spotify source picker |
 | `ECHOMUX_STATE_FILE` | `~/.local/share/echomux/state.json` | Where speaker settings are persisted |
+| `ECHOMUX_MODE` | `standalone` | Operating mode: `standalone`, `master`, or `satellite` |
+| `ECHOMUX_MASTER_ADDR` | _(unset)_ | Master address for satellite mode |
 | `ECHOMUX_DEBUG` | _(unset)_ | Set to `true` for verbose logging |
 
 All settings can also be passed as CLI flags (flags take precedence over env vars). Run `echomux --help` for the full list.

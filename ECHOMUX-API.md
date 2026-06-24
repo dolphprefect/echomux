@@ -6,11 +6,27 @@ No authentication. All request and response bodies are JSON unless noted. Error 
 
 ---
 
+## Modes
+
+echomux operates in one of three modes configured by `ECHOMUX_MODE`:
+
+| Mode | Description |
+|---|---|
+| `standalone` | Single-node; all endpoints operate locally (default) |
+| `master` | Multi-node master; accepts satellite WebSocket connections on `/nodes`; proxies REST calls to satellites via `/nodes/{id}/...` |
+| `satellite` | Connects to master via `/nodes` WebSocket; exposes its own REST API on its local port; audio comes from master via RTP unicast |
+
+In `standalone` mode there is only one node and `/nodes` returns a single-element list.
+
+---
+
 ## Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/devices` | List known speakers with current state |
+| `GET` | `/nodes` | List all nodes (master + satellites) |
+| `ANY` | `/nodes/{id}/...` | Proxy any endpoint to a satellite node |
+| `GET` | `/devices` | List known speakers with current state (all nodes aggregated) |
 | `POST` | `/scan` | Scan for nearby Bluetooth devices |
 | `POST` | `/devices/:mac/connect` | Connect a speaker |
 | `POST` | `/devices/:mac/disconnect` | Disconnect a speaker |
@@ -26,14 +42,59 @@ No authentication. All request and response bodies are JSON unless noted. Error 
 | `POST` | `/input/discover` | Make the Pi discoverable as a BT input target |
 | `GET` | `/stream` | Check whether a Spotify stream is active |
 | `GET` | `/events` | WebSocket — real-time BT and loopback events |
+| `WS` | `/nodes` | WebSocket — satellite registration (master only; used by satellite process, not UI) |
+
+---
+
+## GET /nodes
+
+Returns the list of all known nodes: the local master plus any connected satellites.
+
+**Response 200:**
+
+```json
+[
+  { "id": "living-room", "name": "living-room", "role": "master",    "online": true,  "addr": "" },
+  { "id": "bedroom",     "name": "bedroom",     "role": "satellite", "online": true,  "addr": "192.168.1.10:56644" },
+  { "id": "kitchen",     "name": "kitchen",     "role": "satellite", "online": false, "addr": "192.168.1.11:56644" }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | URL-safe slug derived from `name` (lowercase, spaces → `-`). Used in `/nodes/{id}/...` proxy paths |
+| `name` | string | Human-readable node name set via `ECHOMUX_NAME` |
+| `role` | string | `"master"` or `"satellite"` |
+| `online` | bool | Whether the satellite's WebSocket connection to master is currently active (`true` for master always) |
+| `addr` | string | Satellite's public `host:port`; empty for master |
+
+In standalone mode this always returns a single entry with `role: "master"` and `online: true`.
+
+---
+
+## ANY /nodes/{id}/...
+
+Proxies any endpoint to the satellite identified by `{id}`. The `{id}` is the node's `id` field from `GET /nodes`.
+
+Examples:
+
+```
+GET  /nodes/bedroom/devices          → GET /devices on the bedroom satellite
+POST /nodes/bedroom/scan             → POST /scan on the bedroom satellite
+POST /nodes/bedroom/playback/restart → POST /playback/restart on the bedroom satellite
+```
+
+The master forwards the full request (method, body, query string) and streams the response back. If the satellite is offline the proxy returns `502 Bad Gateway`.
+
+The master's own endpoints are accessed directly (no `/nodes/{id}/` prefix needed, or use the master's own node ID).
 
 ---
 
 ## GET /devices
 
-Returns the list of known speakers.
+Returns the list of known speakers across **all nodes** (master + online satellites).
 
-Only devices that have previously appeared as a `bluez_output.*` PipeWire node are returned. A newly paired device will appear after its first successful connection.
+Each device includes a `node_id` field identifying which node manages it. Devices on the master have `node_id` omitted.
 
 **Response 200:**
 
@@ -48,6 +109,17 @@ Only devices that have previously appeared as a `bluez_output.*` PipeWire node a
     "delay_ms": 250,
     "volume": 74,
     "muted": false
+  },
+  {
+    "MAC": "AA:BB:CC:DD:EE:FF",
+    "Name": "Bedroom Speaker",
+    "Connected": true,
+    "Paired": true,
+    "playing": true,
+    "delay_ms": 0,
+    "volume": 60,
+    "muted": false,
+    "node_id": "bedroom"
   }
 ]
 ```
@@ -62,6 +134,7 @@ Only devices that have previously appeared as a `bluez_output.*` PipeWire node a
 | `delay_ms` | int | Per-speaker delay in milliseconds (0–2000) |
 | `volume` | int | Volume 0–100; `-1` means the PipeWire node has not registered yet |
 | `muted` | bool | Whether the speaker is muted |
+| `node_id` | string | Which satellite manages this device; omitted for master devices |
 
 Returns an empty array `[]` when no speakers have been added yet.
 
@@ -69,7 +142,9 @@ Returns an empty array `[]` when no speakers have been added yet.
 
 ## POST /scan
 
-Starts a Bluetooth discovery scan. While scanning, all active speakers are temporarily disconnected and audio is paused — classic BT inquiry and A2DP streams share the same radio.
+Starts a Bluetooth discovery scan. While scanning, all active speakers on the target node are temporarily disconnected and audio is paused — classic BT inquiry and A2DP streams share the same radio.
+
+To scan on a satellite node, use the proxy: `POST /nodes/{id}/scan`.
 
 **Request body** (optional):
 
@@ -79,17 +154,26 @@ Starts a Bluetooth discovery scan. While scanning, all active speakers are tempo
 
 `timeout_sec` defaults to 10. Must be > 0.
 
-**Response 200** — array of all discovered Bluetooth devices (not filtered to known speakers):
+**Response 200** — always returns an envelope:
 
 ```json
-[
-  { "MAC": "C8:24:78:67:83:C0", "Name": "EDIFIER MP330", "Connected": false, "Paired": false }
-]
+{ "devices": [
+    { "MAC": "C8:24:78:67:83:C0", "Name": "EDIFIER MP330", "Connected": false, "Paired": false }
+  ]
+}
 ```
 
-**After the scan sheet closes**, call `POST /playback/resume` to reconnect speakers and restore audio. The server does not auto-resume — the client owns this lifecycle.
+On scan failure the `devices` array is empty and an `error` field describes the failure:
 
-**Returns:** 200 OK | 500
+```json
+{ "devices": [], "error": "scan timed out" }
+```
+
+The HTTP status is always `200 OK`. An empty `devices` array with no `error` field is a valid empty scan result (no devices found). Check for the presence of `error` to distinguish a failed scan from a successful scan that found nothing.
+
+**Note:** Response headers are flushed immediately when the scan starts so that reverse proxies (including the master's node proxy) do not time out waiting for headers during the scan.
+
+**After the scan sheet closes**, call `POST /playback/resume` to reconnect speakers and restore audio. The server does not auto-resume — the client owns this lifecycle.
 
 ---
 
@@ -277,14 +361,50 @@ Persistent WebSocket connection for real-time state updates. Each message is a J
 { "type": "loopback_started", "mac": "C8:24:78:67:83:C0" }
 ```
 
-| `type` | `mac` | Meaning |
+| `type` | Fields | Meaning |
 |---|---|---|
-| `connected` | speaker MAC | Bluetooth connection established |
-| `disconnected` | speaker MAC | Bluetooth connection dropped |
-| `paired` | speaker MAC | Bluetooth pairing completed |
-| `loopback_started` | speaker MAC | Audio loopback is live — speaker is now playing |
-| `loopback_stopped` | speaker MAC | Audio loopback died — speaker is connected but silent |
+| `connected` | `mac` | Bluetooth connection established |
+| `disconnected` | `mac` | Bluetooth connection dropped |
+| `paired` | `mac` | Bluetooth pairing completed |
+| `loopback_started` | `mac` | Audio loopback is live — speaker is now playing |
+| `loopback_stopped` | `mac` | Audio loopback died — speaker is connected but silent |
+| `satellite_online` | `id`, `name` | A satellite node connected to the master |
+| `satellite_offline` | `id`, `name` | A satellite node disconnected from the master |
+
+`satellite_online` / `satellite_offline` are only emitted by master nodes. On receiving either, refresh `GET /nodes` and `GET /devices`.
 
 The server accepts any Origin (no CSRF protection — appropriate for a local network device).
 
 Clients should reconnect automatically on close. Poll `GET /devices` every 5 s as a fallback.
+
+---
+
+## WS /nodes — Satellite control plane
+
+```
+ws://<master-host>:56644/nodes
+```
+
+Used by the satellite process to register with the master. Not intended for UI clients.
+
+**Protocol:**
+
+1. Satellite connects and immediately sends a `register` message:
+
+```json
+{ "type": "register", "name": "bedroom", "addr": "192.168.1.10:56644" }
+```
+
+`addr` is the satellite's public `host:port` for HTTP proxy. If omitted or port-only (`:56644`), the master derives the IP from the connection's remote address.
+
+2. Master replies with an `rtp_config` message:
+
+```json
+{ "type": "rtp_config", "rtp_port": 9001 }
+```
+
+The satellite configures its PipeWire RTP source to receive on this port.
+
+3. The connection stays open as a heartbeat. The master broadcasts `satellite_online` to `/events` clients. The master sends periodic `devices_push` messages to keep satellite device state cached for `GET /devices` aggregation. The satellite sends BT events upstream as `event` messages so they can be re-broadcast to `/events` clients on the master.
+
+4. When the connection closes, the master marks the node offline and broadcasts `satellite_offline` to all `/events` clients.

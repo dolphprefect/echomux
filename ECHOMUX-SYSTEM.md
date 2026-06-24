@@ -6,7 +6,19 @@ For the HTTP API see [ECHOMUX-API.md](ECHOMUX-API.md). For the end-user overview
 
 ---
 
-## How it works
+## Operating modes
+
+echomux runs in one of three modes set via `ECHOMUX_MODE`:
+
+| Mode | Description |
+|---|---|
+| `standalone` | Default. Single node; no satellite support |
+| `master` | Accepts satellite connections; proxies HTTP to satellites; aggregates devices in `GET /devices` |
+| `satellite` | Connects to master via WebSocket; receives audio via RTP unicast; exposes local REST API |
+
+---
+
+## Single-node architecture
 
 ```
 Spotify app (phone)
@@ -31,6 +43,74 @@ Spotify app (phone)
 
 ---
 
+## Multi-node / satellite architecture
+
+```
+                        MASTER Pi
+  ┌─────────────────────────────────────────────────────┐
+  │  Spotify → librespot → pw-cat → main-mix             │
+  │                                                      │
+  │  echomux binary (mode=master)                        │
+  │  ┌──────────────┐  ┌──────────────────────────────┐ │
+  │  │  web UI      │  │  /nodes WebSocket server     │ │
+  │  │  REST API    │  │  satellite registry          │ │
+  │  │  /nodes/{id} │  │  RTP sink manager            │ │
+  │  │  HTTP proxy  │  └──────────────────────────────┘ │
+  └──────────────────────────┬──────────────────────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              │ WebSocket (/nodes)          │ WebSocket (/nodes)
+              │ RTP unicast (UDP 9001)      │ RTP unicast (UDP 9001)
+              ▼                             ▼
+        SATELLITE Pi (bedroom)       SATELLITE Pi (kitchen)
+        ┌─────────────────────┐     ┌─────────────────────┐
+        │  rtp-source (PW)    │     │  rtp-source (PW)    │
+        │  main-mix           │     │  main-mix           │
+        │  pw-loopbacks       │     │  pw-loopbacks       │
+        │  BT speakers        │     │  BT speakers        │
+        │  echomux REST API   │     │  echomux REST API   │
+        └─────────────────────┘     └─────────────────────┘
+```
+
+### Control plane (WebSocket `/nodes`)
+
+Each satellite dials `ws://<master>:56644/nodes` on startup and sends a `register` message with its name and public address. The master:
+
+1. Assigns or derives a node ID (slugified name)
+2. Spawns a `libpipewire-module-rtp-sink` via a persistent `pw-cli` subprocess pointing at the satellite's IP
+3. Sends `{"type":"rtp_config","rtp_port":9001}` back to the satellite
+4. Broadcasts `satellite_online` to all `/events` WebSocket clients
+
+The WebSocket connection stays open as a heartbeat. The master caches the satellite's device list (refreshed periodically) for `GET /devices` aggregation. BT events from the satellite are forwarded upstream to `/events`.
+
+When the connection drops, the master kills the RTP sink, marks the node offline, and broadcasts `satellite_offline`.
+
+### Audio plane (RTP unicast)
+
+Audio flows from master to satellite as raw PCM wrapped in RTP (L16/48000/2 — 16-bit stereo at 48 kHz):
+
+```
+main-mix (PipeWire on master)
+   └──▶ libpipewire-module-rtp-sink (UDP unicast to satellite IP:9001)
+             └──▶ rtp-source (PipeWire module on satellite)
+                       └──▶ main-mix (satellite)
+                                 └──▶ pw-loopbacks → BT speakers
+```
+
+The RTP sink on the master is managed by a persistent `pw-cli` subprocess. The subprocess holds the PipeWire module loaded for the duration of the satellite session. Killing the subprocess unloads the module.
+
+**Orphan cleanup:** At master startup, `pkill -KILL -x pw-cli` terminates any `pw-cli` processes left from a previous crash before new sinks are created.
+
+### HTTP proxy (`/nodes/{id}/...`)
+
+The master proxies all REST calls to satellites:
+
+- `POST /nodes/bedroom/scan` → `POST http://192.168.1.10:56644/scan`
+- The master uses an `http.Transport` with `ResponseHeaderTimeout: 5s`
+- Scan responses flush their `200 OK` headers immediately before the scan runs, so the proxy's short header timeout is not triggered by a 10-second scan
+
+---
+
 ## Go service internals
 
 The `echomux` binary (`service/cmd/echomux/main.go`) runs two main loops:
@@ -46,9 +126,9 @@ The `echomux` binary (`service/cmd/echomux/main.go`) runs two main loops:
 4. **Zombie watchdog**: if a loopback has been running >5 s but its PipeWire link is not in `active` state, kills and restarts it. A 30 s cooldown prevents thrash
 5. Kills loopbacks for speakers whose BT node has disappeared
 
-### hub (WebSocket)
+### hub (WebSocket `/events`)
 
-Reads BlueZ D-Bus events (connected / disconnected / paired) and forwards them to all WebSocket clients. Also sends `loopback_started` / `loopback_stopped` events when the tickRouter spawns or kills a loopback.
+Reads BlueZ D-Bus events (connected / disconnected / paired) and forwards them to all WebSocket clients. Also sends `loopback_started` / `loopback_stopped` events when the tickRouter spawns or kills a loopback. In master mode, also forwards events from satellites and emits `satellite_online` / `satellite_offline`.
 
 ### State persistence
 
@@ -75,8 +155,8 @@ Custom config files installed to `/etc/pipewire/pipewire.conf.d/`:
 
 | File | Purpose |
 |---|---|
-| `10-rtp-source.conf` | Creates the `rtp-source` node — receives raw PCM from librespot via UDP on port 9001 |
-| `20-main-mix-loopback.conf` | Creates the `main-mix` virtual sink that aggregates audio from librespot before fanning out to speakers |
+| `10-rtp-source.conf` | Creates the `rtp-source` node — receives raw PCM from librespot (standalone/satellite) or from the master RTP sink (satellite mode) via UDP on port 9001 |
+| `20-main-mix-loopback.conf` | Creates the `main-mix` virtual sink that aggregates audio before fanning out to speakers |
 
 ### Why main-mix
 
@@ -131,8 +211,11 @@ npm test
 cd service/
 make build
 
-# Deploy to running Pi
-make install   # stops echomux, copies binary, starts echomux
+# Deploy to master Pi
+make deploy   # build + install + restart echomux on master
+
+# Deploy to satellite Pi (requires Makefile.local with SSH target)
+make deploy-satellite
 ```
 
 Manual deploy:
@@ -152,6 +235,21 @@ sudo systemctl start echomux
 | `make ui` | Build the Svelte frontend → `service/internal/api/static/` |
 | `make build` | Build UI, then compile Go binary |
 | `make install` | Build, stop service, install binary, start service |
+| `make deploy` | Alias for `make install` — deploys to the local (master) Pi |
+| `make deploy-satellite` | Build and deploy to the satellite Pi via SSH (configured in `Makefile.local`) |
+
+### Satellite configuration file
+
+A template satellite configuration is committed at `service/setup/echomux-satellite.conf`. Copy it to `/etc/echomux/echomux.conf` on the satellite Pi and adjust:
+
+```ini
+ECHOMUX_ADAPTER=hci0        # adapter to use (hci0, hci1, etc.)
+ECHOMUX_ADDR=:56644
+ECHOMUX_MODE=satellite
+ECHOMUX_NAME=bedroom        # label shown in the UI
+ECHOMUX_MASTER_ADDR=192.168.1.3:56644
+ECHOMUX_DEBUG=true
+```
 
 ---
 
@@ -163,20 +261,24 @@ echomux/
 │   ├── cmd/echomux/main.go          — binary entry point, flag parsing
 │   ├── internal/
 │   │   ├── api/                     — HTTP handlers, tickRouter, WebSocket hub
+│   │   │   ├── handlers.go          — all REST handlers + statusWriter middleware
+│   │   │   ├── satellite_server.go  — /nodes WebSocket server, satellite registry, RTP sink lifecycle
 │   │   │   └── static/              — embedded web UI (built from service/ui/)
-│   │   ├── audio/                   — PipeWire shell wrappers (pw-dump, wpctl, pw-link)
+│   │   ├── audio/                   — PipeWire shell wrappers (pw-dump, wpctl, pw-link, rtp.go)
 │   │   └── bluetooth/               — BlueZ D-Bus wrapper (go-bluetooth)
 │   ├── ui/                          — Svelte frontend source
 │   │   └── src/
-│   │       ├── App.svelte           — main component (speaker list, WebSocket, polling)
-│   │       ├── lib/api.js           — fetch wrapper
+│   │       ├── App.svelte           — main component (node list, speaker list, WebSocket, polling)
+│   │       ├── lib/api.js           — fetch wrapper with optional nodeId routing
 │   │       └── components/
-│   │           ├── DeviceCard.svelte — per-speaker card (volume, mute, delay chip)
-│   │           ├── ScanSheet.svelte  — BT scan and pair flow
-│   │           └── DelaySheet.svelte — per-speaker delay adjustment
+│   │           ├── NodeSection.svelte — per-node group heading bar + speaker list
+│   │           ├── DeviceCard.svelte  — per-speaker card (volume, mute, delay chip)
+│   │           ├── ScanSheet.svelte   — BT scan and pair flow (node-aware)
+│   │           └── DelaySheet.svelte  — per-speaker delay adjustment
 │   ├── setup/
 │   │   ├── install.sh               — full bootstrap script
 │   │   ├── echomux.service          — systemd unit
+│   │   ├── echomux-satellite.conf   — satellite configuration template
 │   │   ├── librespot.service        — librespot systemd unit
 │   │   ├── librespot-pipewire.sh    — librespot → pw-cat wrapper script
 │   │   ├── echomux-avahi.service    — mDNS advertisement
@@ -244,6 +346,46 @@ sudo systemctl restart librespot echomux
 sudo systemctl restart bluetooth
 # or for a specific adapter:
 sudo hciconfig hci0 down && sudo hciconfig hci0 up
+```
+
+### Satellite not appearing in the UI
+
+```bash
+# On the satellite:
+journalctl -u echomux -f   # look for "registered with master" or connection errors
+
+# On the master:
+journalctl -u echomux -f   # look for "satellite registered" or "satellite offline"
+
+# Verify the satellite can reach the master
+curl http://192.168.1.3:56644/nodes
+```
+
+### Satellite discovers no Bluetooth devices
+
+Common on USB Bluetooth dongles with outdated firmware. Symptoms: `Opcode 0x2042 failed: -16` in `dmesg` (HCI_OP_LE_SET_SCAN_PARAMETERS returns -EBUSY).
+
+```bash
+# Check firmware version on the satellite
+ls -la /lib/firmware/rtl_bt/
+
+# Reload the BT driver
+sudo rmmod btusb && sudo modprobe btusb
+
+# If a known-good firmware exists on another Pi, copy it:
+# (from master to satellite)
+scp /lib/firmware/rtl_bt/rtl8761bu_fw.bin pi@<satellite-ip>:/tmp/
+# then on satellite: sudo cp /tmp/rtl8761bu_fw.bin /lib/firmware/rtl_bt/
+# then: sudo rmmod btusb && sudo modprobe btusb
+```
+
+### RTP sink orphans after master crash
+
+```bash
+# Kill any orphaned pw-cli processes
+sudo pkill -KILL -x pw-cli
+# Then restart echomux
+sudo systemctl restart echomux
 ```
 
 ### PipeWire graph inspection

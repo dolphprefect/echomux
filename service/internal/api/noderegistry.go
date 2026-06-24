@@ -143,3 +143,19 @@ func (r *nodeRegistry) list() []*nodeInfo {
 	}
 	return out
 }
+
+// getNode returns a thread-safe snapshot copy of the nodeInfo for nodeID.
+func (r *nodeRegistry) getNode(id string) *nodeInfo {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, exists := r.nodes[id]
+	if !exists {
+		return nil
+	}
+	cp := *n
+	if len(n.Devices) > 0 {
+		cp.Devices = make([]deviceInfo, len(n.Devices))
+		copy(cp.Devices, n.Devices)
+	}
+	return &cp
+}

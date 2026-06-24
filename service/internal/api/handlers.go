@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -55,6 +56,7 @@ type server struct {
 	saveTimerMu       sync.Mutex
 	saveTimer         *time.Timer              // debounces rapid saveState calls
 	satPushCh         chan struct{}
+	proxyTransport    *http.Transport
 }
 
 func (s *server) dbg(format string, args ...any) {
@@ -115,6 +117,19 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 		heartbeatInterval: 10 * time.Second,
 		pongTimeout:       5 * time.Second,
 		satPushCh:         make(chan struct{}, 1),
+		proxyTransport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   2,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: 5 * time.Second,
+		},
 	}
 	for _, o := range opts {
 		o(s)
@@ -280,6 +295,7 @@ func (s *server) routes() {
 	mux := s.mux
 	mux.Handle("/", staticHandler())
 	mux.HandleFunc("GET /nodes", s.handleNodes)
+	mux.HandleFunc("/nodes/{id}/", s.handleNodeProxy)
 	mux.HandleFunc("GET /devices", s.handleGetDevices)
 	mux.HandleFunc("POST /scan", s.handleScan)
 	mux.HandleFunc("POST /devices/{mac}/connect", s.handleConnect)

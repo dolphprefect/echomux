@@ -8,19 +8,22 @@ import (
 )
 
 type MockController struct {
-	mu          sync.Mutex
-	sinks       []Node
-	sources     []Node
-	namedNodes  map[string]Node
-	volumes     map[int]int
-	mutes       map[int]bool
-	links       map[string]bool // "srcID->dstID"
-	pwLinks     []LinkInfo      // injectable PW link states for watchdog tests
-	sourcesErr  error
-	nodesErr    error
-	snapshotErr error
-	volumeErr   error
-	muteErr     error
+	mu           sync.Mutex
+	sinks        []Node
+	sources      []Node
+	namedNodes   map[string]Node
+	volumes      map[int]int
+	mutes        map[int]bool
+	links        map[string]bool // "srcID->dstID"
+	pwLinks      []LinkInfo      // injectable PW link states for watchdog tests
+	sourcesErr   error
+	nodesErr     error
+	snapshotErr  error
+	volumeErr    error
+	muteErr      error
+	rtpModuleID  int
+	rtpAddErr    error
+	rtpRemoveErr error
 }
 
 func NewMockController(sinks []Node) *MockController {
@@ -214,6 +217,33 @@ func (c *MockController) Links(_ context.Context) ([]LinkInfo, error) {
 	out := make([]LinkInfo, len(c.pwLinks))
 	copy(out, c.pwLinks)
 	return out, nil
+}
+
+// SetRTPAddResult configures the module ID and error returned by AddRTPSink.
+func (c *MockController) SetRTPAddResult(moduleID int, err error) {
+	c.mu.Lock()
+	c.rtpModuleID = moduleID
+	c.rtpAddErr = err
+	c.mu.Unlock()
+}
+
+// SetRTPRemoveErr configures the error returned by RemoveRTPSink.
+func (c *MockController) SetRTPRemoveErr(err error) {
+	c.mu.Lock()
+	c.rtpRemoveErr = err
+	c.mu.Unlock()
+}
+
+func (c *MockController) AddRTPSink(_ context.Context, _ string, _ int) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rtpModuleID, c.rtpAddErr
+}
+
+func (c *MockController) RemoveRTPSink(_ context.Context, _ int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rtpRemoveErr
 }
 
 func (c *MockController) Linked(dstID int) bool {

@@ -44,6 +44,10 @@ type Controller interface {
 	SetMute(ctx context.Context, nodeID int, muted bool) error
 	// GetVolume returns the current volume [0-100] for the given PipeWire node ID.
 	GetVolume(ctx context.Context, nodeID int) (int, error)
+	// AddRTPSink loads a module-rtp-send module via pactl and returns the module ID.
+	AddRTPSink(ctx context.Context, destIP string, port int) (int, error)
+	// RemoveRTPSink unloads the module-rtp-send module with the given ID via pactl.
+	RemoveRTPSink(ctx context.Context, moduleID int) error
 }
 
 type Executor interface {

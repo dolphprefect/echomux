@@ -4,8 +4,10 @@
   import DeviceCard from './components/DeviceCard.svelte'
   import ScanSheet from './components/ScanSheet.svelte'
   import DelaySheet from './components/DelaySheet.svelte'
+  import NodeSection from './components/NodeSection.svelte'
 
   let devices = []
+  let nodes = []
   let loadError = false
   let reconnecting = false
   let scanOpen = false
@@ -13,18 +15,31 @@
   let connecting = new Set()
   let connectErrors = {} // MAC → transient error string
   let restarting = false
+  let restartingNodeId = null
+  let scanningNodeId = null
   let destroyed = false
+
+  $: masterNode = nodes.find(n => n.role === 'master')
+  $: masterNodeId = masterNode ? masterNode.id : ''
+
+  function nodeApiId(nodeId) {
+    return nodeId === masterNodeId ? undefined : nodeId
+  }
 
   async function load() {
     try {
-      const fresh = await api('GET', '/devices')
+      const [freshDevices, freshNodes] = await Promise.all([
+        api('GET', '/devices'),
+        api('GET', '/nodes')
+      ])
       // The API returns lowercase "muted" and "playing" (json: tags in Go);
       // components and WS event handlers read capital-case Muted / Playing.
       // Normalise here so every poll keeps the display in sync.
-      devices = fresh.map(d => {
+      devices = freshDevices.map(d => {
         const n = { ...d, Muted: d.muted, Playing: d.playing }
         return connecting.has(n.MAC) ? { ...n, Connected: true } : n
       })
+      nodes = freshNodes
       loadError = false
     } catch(e) {
       loadError = true
@@ -41,6 +56,10 @@
     ws.onmessage = e => {
       try {
         const ev = JSON.parse(e.data)
+        if (ev.type === 'satellite_online' || ev.type === 'satellite_offline') {
+          load()
+          return
+        }
         const dev = devices.find(d => d.MAC === ev.mac)
         if (!dev) return
         if (ev.type === 'connected' || ev.type === 'disconnected') {
@@ -68,13 +87,16 @@
     ws?.close()
   })
 
-  async function doConnect(mac) {
+  async function doConnect(detail) {
+    const mac = typeof detail === 'string' ? detail : detail.mac
+    const nodeId = typeof detail === 'object' ? detail.nodeId : undefined
+
     connecting.add(mac)
     connecting = connecting
     const { [mac]: _, ...rest } = connectErrors
     connectErrors = rest  // clear any previous error for this MAC
     try {
-      await api('POST', `/devices/${mac}/connect`)
+      await api('POST', `/devices/${mac}/connect`, undefined, nodeApiId(nodeId))
       const dev = devices.find(d => d.MAC === mac)
       if (dev) { dev.Connected = true; devices = devices }
     } catch(e) {
@@ -90,21 +112,27 @@
     }
   }
 
-  async function doDisconnect(mac) {
+  async function doDisconnect(detail) {
+    const mac = typeof detail === 'string' ? detail : detail.mac
+    const nodeId = typeof detail === 'object' ? detail.nodeId : undefined
+
     const dev = devices.find(d => d.MAC === mac)
     if (dev) { dev.Connected = false; dev.Playing = false; devices = devices }
     try {
-      await api('POST', `/devices/${mac}/disconnect`)
+      await api('POST', `/devices/${mac}/disconnect`, undefined, nodeApiId(nodeId))
     } catch(e) {
       if (dev) { dev.Connected = true; devices = devices }
     }
   }
 
-  async function doForget(mac) {
+  async function doForget(detail) {
+    const mac = typeof detail === 'string' ? detail : detail.mac
+    const nodeId = typeof detail === 'object' ? detail.nodeId : undefined
+
     const dev = devices.find(d => d.MAC === mac)
     if (!confirm(`Forget ${dev?.Name || mac}?\nThis will unpair the speaker from this Pi.`)) return
     try {
-      await api('DELETE', `/devices/${mac}`)
+      await api('DELETE', `/devices/${mac}`, undefined, nodeApiId(nodeId))
       devices = devices.filter(d => d.MAC !== mac)
     } catch(e) {}
   }
@@ -131,18 +159,35 @@
     restarting = false
   }
 
+  async function restartAudioNode(nodeId) {
+    restartingNodeId = nodeId
+    try {
+      await api('POST', '/playback/restart', undefined, nodeApiId(nodeId))
+      await new Promise(r => setTimeout(r, 2500))
+      await load()
+    } catch(e) {}
+    restartingNodeId = null
+  }
+
+  function startScan(nodeId) {
+    scanningNodeId = nodeId
+    scanOpen = true
+  }
+
   async function handleScanClose(e) {
     scanOpen = false
     const prev = e.detail.prevConnected || []
     reconnecting = true
+    const currentScanNodeId = scanningNodeId
     try {
-      await api('POST', '/playback/resume')
+      await api('POST', '/playback/resume', undefined, nodeApiId(currentScanNodeId))
       for (const d of prev) {
-        try { await api('POST', `/devices/${d.MAC}/connect`) } catch(e) {}
+        try { await api('POST', `/devices/${d.MAC}/connect`, undefined, nodeApiId(currentScanNodeId)) } catch(e) {}
       }
     } finally {
       reconnecting = false
       await load()
+      scanningNodeId = null
     }
   }
 
@@ -162,8 +207,8 @@
   <div style="display:flex;align-items:center;gap:6px">
     <button
       class="btn-restart"
-      class:spinning={restarting}
-      disabled={restarting || reconnecting}
+      class:spinning={restarting || restartingNodeId !== null}
+      disabled={restarting || reconnecting || restartingNodeId !== null}
       title="Restart audio loopbacks"
       on:click={restartAudio}
     >
@@ -172,47 +217,77 @@
         <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
       </svg>
     </button>
-    <button
-      class="btn-add"
-      disabled={reconnecting}
-      title={reconnecting ? 'Reconnecting speakers…' : 'Add speaker'}
-      on:click={() => { if (!reconnecting) scanOpen = true }}
-    >
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-        <line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>
-      </svg>
-    </button>
+    {#if nodes.length <= 1}
+      <button
+        class="btn-add"
+        disabled={reconnecting}
+        title={reconnecting ? 'Reconnecting speakers…' : 'Add speaker'}
+        on:click={() => { if (!reconnecting) startScan(masterNodeId) }}
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>
+        </svg>
+      </button>
+    {/if}
   </div>
 </header>
 
-<div id="device-list">
+<main class="content-container">
   {#if loadError}
-    <p class="empty">
-      <strong>Can't reach echomux</strong>
-      Check your connection.<br><br>
-      <button class="btn-connect" on:click={load}>Try again</button>
-    </p>
-  {:else if devices.length === 0 && !loadError}
-    <p class="empty"><strong>No speakers yet</strong>Tap + to add one.</p>
+    <div id="device-list">
+      <p class="empty">
+        <strong>Can't reach echomux</strong>
+        Check your connection.<br><br>
+        <button class="btn-connect" on:click={load}>Try again</button>
+      </p>
+    </div>
+  {:else if nodes.length > 1}
+    <div class="nodes-container">
+      {#each nodes as node (node.id)}
+        <NodeSection
+          {node}
+          devices={devices.filter(d => d.node_id === node.id || (!d.node_id && node.role === 'master'))}
+          {connecting}
+          {connectErrors}
+          {scanningNodeId}
+          {reconnecting}
+          on:connect={e => doConnect(e.detail)}
+          on:disconnect={e => doDisconnect(e.detail)}
+          on:forget={e => doForget(e.detail)}
+          on:openDelay={e => delayDevice = e.detail}
+          on:volumeChange={handleVolumeChange}
+          on:muteChange={handleMuteChange}
+          on:scan={e => startScan(e.detail)}
+          on:restart={e => restartAudioNode(e.detail)}
+        />
+      {/each}
+    </div>
   {:else}
-    {#each sorted as device (device.MAC)}
-      <DeviceCard
-        {device}
-        isConnecting={connecting.has(device.MAC)}
-        connectError={connectErrors[device.MAC] || null}
-        on:connect={e => doConnect(e.detail)}
-        on:disconnect={e => doDisconnect(e.detail)}
-        on:forget={e => doForget(e.detail)}
-        on:openDelay={e => delayDevice = e.detail}
-        on:volumeChange={handleVolumeChange}
-        on:muteChange={handleMuteChange}
-      />
-    {/each}
+    <div id="device-list">
+      {#if devices.length === 0 && !loadError}
+        <p class="empty"><strong>No speakers yet</strong>Tap + to add one.</p>
+      {:else}
+        {#each sorted as device (device.MAC)}
+          <DeviceCard
+            {device}
+            isConnecting={connecting.has(device.MAC)}
+            connectError={connectErrors[device.MAC] || null}
+            disabled={scanningNodeId !== null}
+            on:connect={e => doConnect(e.detail)}
+            on:disconnect={e => doDisconnect(e.detail)}
+            on:forget={e => doForget(e.detail)}
+            on:openDelay={e => delayDevice = e.detail}
+            on:volumeChange={handleVolumeChange}
+            on:muteChange={handleMuteChange}
+          />
+        {/each}
+      {/if}
+    </div>
   {/if}
-</div>
+</main>
 
 {#if scanOpen}
-  <ScanSheet {knownMACs} on:close={handleScanClose} />
+  <ScanSheet {knownMACs} nodeId={nodeApiId(scanningNodeId)} on:close={handleScanClose} />
 {/if}
 
 {#if delayDevice}
@@ -225,3 +300,14 @@
     }}
   />
 {/if}
+
+<style>
+  .content-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 0 16px 40px;
+  }
+  .nodes-container {
+    margin-top: 16px;
+  }
+</style>

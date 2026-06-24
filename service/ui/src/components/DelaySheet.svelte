@@ -16,7 +16,7 @@
     const prev = ms
     ms = clamped
     try {
-      await api('PUT', `/devices/${device.MAC}/delay`, { ms: clamped })
+      await api('PUT', `/devices/${device.MAC}/delay`, { ms: clamped }, device.node_id)
       dispatch('updated', { mac: device.MAC, ms: clamped })
     } catch(e) {
       ms = prev

@@ -427,3 +427,15 @@ input[type=range]:disabled { opacity: .35; cursor: default; }
 .btn-adj:active { filter: brightness(1.4); }
 .btn-dec { background: var(--red-dim); color: var(--red); }
 .btn-inc { background: var(--gold-dim); color: var(--gold); }
+
+/* Disabled states */
+.btn-power:disabled,
+.btn-connect:disabled,
+.btn-forget:disabled,
+.btn-mute:disabled,
+.delay-chip.disabled {
+  opacity: .35;
+  cursor: default;
+  pointer-events: none;
+}
+

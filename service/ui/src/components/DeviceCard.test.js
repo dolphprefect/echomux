@@ -206,4 +206,44 @@ describe('DeviceCard', () => {
     expect(handler.mock.calls[0][0].detail).toEqual({ mac: 'AA:BB:CC:DD:EE:FF', muted: true })
     expect(handler.mock.calls[1][0].detail).toEqual({ mac: 'AA:BB:CC:DD:EE:FF', muted: false })
   })
+
+  it('disables volume slider, mute button and actions when disabled prop is true', async () => {
+    const dev = { ...baseDevice, Connected: true, Muted: false }
+    const { container, component } = render(DeviceCard, { props: { device: dev, disabled: true } })
+    
+    const slider = container.querySelector('input[type="range"]')
+    const muteBtn = container.querySelector('.btn-mute')
+    const powerBtn = container.querySelector('.btn-power')
+    const delayChip = container.querySelector('.delay-chip')
+    
+    expect(slider.disabled).toBe(true)
+    expect(muteBtn.disabled).toBe(true)
+    expect(powerBtn.disabled).toBe(true)
+    expect(delayChip.classList.contains('disabled')).toBe(true)
+
+    // Verify events are not triggered when clicked/changed
+    const volHandler = vi.fn()
+    const muteHandler = vi.fn()
+    const delayHandler = vi.fn()
+    component.$on('volumeChange', volHandler)
+    component.$on('muteChange', muteHandler)
+    component.$on('openDelay', delayHandler)
+
+    await fireEvent.click(muteBtn)
+    await fireEvent.click(delayChip)
+    await fireEvent.input(slider, { target: { value: '80' } })
+    await fireEvent.change(slider, { target: { value: '80' } })
+
+    expect(muteHandler).not.toHaveBeenCalled()
+    expect(delayHandler).not.toHaveBeenCalled()
+    expect(volHandler).not.toHaveBeenCalled()
+  })
+
+  it('disables connect and forget buttons when disabled prop is true', () => {
+    const { container } = render(DeviceCard, { props: { device: baseDevice, disabled: true } })
+    const connectBtn = container.querySelector('.btn-connect')
+    const forgetBtn = container.querySelector('.btn-forget')
+    expect(connectBtn.disabled).toBe(true)
+    expect(forgetBtn.disabled).toBe(true)
+  })
 })

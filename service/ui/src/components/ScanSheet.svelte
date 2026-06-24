@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js'
 
   export let knownMACs = new Set()
+  export let nodeId = null
 
   const dispatch = createEventDispatcher()
 
@@ -14,7 +15,7 @@
   onMount(async () => {
     // Capture who was connected before the scan pauses them.
     try {
-      const devs = await api('GET', '/devices')
+      const devs = await api('GET', '/devices', undefined, nodeId)
       prevConnected = devs.filter(d => d.Connected)
     } catch(e) {}
     await startScan()
@@ -25,7 +26,7 @@
     results = []
     adding = {}
     try {
-      const all = await api('POST', '/scan', { timeout_sec: 10 })
+      const all = await api('POST', '/scan', { timeout_sec: 10 }, nodeId)
       results = all.filter(d => !knownMACs.has(d.MAC))
     } catch(e) {
       results = []
@@ -36,8 +37,8 @@
   async function addDevice(mac) {
     adding = { ...adding, [mac]: 'loading' }
     try {
-      await api('POST', `/devices/${mac}/pair`)
-      await api('POST', `/devices/${mac}/connect`)
+      await api('POST', `/devices/${mac}/pair`, undefined, nodeId)
+      await api('POST', `/devices/${mac}/connect`, undefined, nodeId)
       const updated = { ...adding, [mac]: 'done' }
       adding = updated
       // Only auto-close when no other adds are still in-flight.

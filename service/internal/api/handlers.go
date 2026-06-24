@@ -576,6 +576,16 @@ func (s *server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.dbg("connect %s: BT connected, waiting for PW node", mac)
+	// Clear any stale dead loopback entry and the zombie watchdog cooldown so
+	// tickRouter starts a fresh loopback and the watchdog can fire immediately
+	// if the first attempt fails, rather than waiting 30 s.
+	s.mu.Lock()
+	if speakerDead(s.speakers[mac]) {
+		delete(s.speakers, mac)
+	}
+	delete(s.watchdogRestarts, mac)
+	s.mu.Unlock()
+
 	// Always broadcast connected here — bt.Connect() only emits the event when
 	// d.Connect() returns nil, so the "AlreadyConnected" success path is silent.
 	go s.hub.broadcast(context.Background(), map[string]string{"type": "connected", "mac": mac})
@@ -585,9 +595,9 @@ func (s *server) handleConnect(w http.ResponseWriter, r *http.Request) {
 			s.tickRouter(context.Background())
 			time.Sleep(500 * time.Millisecond)
 			s.mu.Lock()
-			_, running := s.speakers[mac]
+			alive := !speakerDead(s.speakers[mac])
 			s.mu.Unlock()
-			if running {
+			if alive {
 				s.dbg("connect %s: loopback running after %d polls", mac, i+1)
 				break
 			}

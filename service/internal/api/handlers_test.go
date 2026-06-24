@@ -502,7 +502,9 @@ func TestPostScan_DevicesErrAfterScan(t *testing.T) {
 	resp, err := http.Post(ts.URL+"/scan", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	// 200 + empty array: headers are committed before the scan runs, so errors
+	// cannot change the status code (deliberate behaviour change).
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 // TestPostConnect_TransientErrRetries verifies that a transient Connect error
@@ -747,7 +749,9 @@ func TestPostScan_ScanError(t *testing.T) {
 	resp, err := http.Post(ts.URL+"/scan", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	// 200 + empty array: headers are committed before the scan runs, so errors
+	// cannot change the status code (deliberate behaviour change).
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestPostScan_DefaultTimeout(t *testing.T) {

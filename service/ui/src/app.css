@@ -27,9 +27,9 @@ html, body {
 body {
   padding:
     calc(env(safe-area-inset-top, 0px) + 12px)
-    calc(env(safe-area-inset-right, 0px) + 16px)
+    calc(env(safe-area-inset-right, 0px) + 8px)
     calc(env(safe-area-inset-bottom, 0px) + 32px)
-    calc(env(safe-area-inset-left, 0px) + 16px);
+    calc(env(safe-area-inset-left, 0px) + 8px);
   max-width: 520px;
   margin: 0 auto;
 }
@@ -53,7 +53,7 @@ header {
 }
 .wordmark b { color: var(--text); font-weight: 600; }
 .wordmark .sep { color: var(--gold); }
-.wordmark-icon { width: 28px; height: 28px; border-radius: 7px; }
+.wordmark-icon { width: 56px; height: 56px; border-radius: 14px; }
 
 .btn-add {
   width: 34px; height: 34px;

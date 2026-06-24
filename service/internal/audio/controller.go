@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type controller struct {
-	exec Executor
+	exec     Executor
+	rtpMu    sync.Mutex
+	rtpSinks map[int]*exec.Cmd // port → running pw-cli subprocess
 }
 
 func NewController(exec Executor) Controller {

@@ -88,92 +88,82 @@
 
 <style>
   .node-section {
-    margin-bottom: 24px;
-    border-radius: 12px;
-    background: var(--card-bg, #1a1a1a);
-    overflow: hidden;
-    border: 1px solid var(--border, #2a2a2a);
+    margin-bottom: 20px;
   }
   .node-section.offline {
-    opacity: 0.6;
-    border-style: dashed;
+    opacity: 0.55;
   }
   .node-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.02);
-    border-bottom: 1px solid var(--border, #2a2a2a);
+    padding: 6px 0 10px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
   }
   .node-title {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.95rem;
-    font-weight: 600;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .role-badge {
-    font-size: 0.7rem;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: #333;
-    color: #ccc;
+    color: var(--sub);
   }
   .role-badge.master {
-    background: rgba(230, 185, 30, 0.15);
-    color: var(--gold, #e6b91e);
+    color: var(--gold);
   }
   .node-name {
-    color: var(--fg, #fff);
+    color: var(--sub);
   }
   .offline-badge {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     font-weight: 700;
-    padding: 2px 6px;
+    padding: 2px 5px;
     border-radius: 4px;
-    background: #600;
-    color: #ffcdd2;
+    background: var(--red-dim);
+    color: var(--red);
+    letter-spacing: 0.05em;
   }
   .node-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
   }
   .btn-node-restart, .btn-node-add {
     background: none;
     border: none;
-    color: var(--sub, #888);
+    color: var(--sub);
     cursor: pointer;
-    padding: 6px;
+    padding: 5px;
     border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.15s, color 0.15s;
+    transition: color 0.15s;
   }
   .btn-node-restart:hover, .btn-node-add:hover {
-    background: var(--border, #2a2a2a);
-    color: var(--fg, #fff);
+    color: var(--text);
   }
   .btn-node-restart svg, .btn-node-add svg {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
   }
   .btn-node-add:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
   .node-devices {
-    padding: 16px;
     display: grid;
     grid-template-columns: 1fr;
-    gap: 16px;
   }
   @media(min-width: 600px) {
     .node-devices {
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 0 8px;
     }
   }
   .node-devices.throttled {
@@ -182,16 +172,15 @@
   }
   .empty-node {
     grid-column: 1 / -1;
-    text-align: center;
-    color: var(--sub, #888);
-    font-size: 0.9rem;
-    padding: 16px 0;
+    color: var(--sub);
+    font-size: 0.85rem;
+    padding: 12px 0;
     margin: 0;
   }
   .spinner-sm {
     display: inline-block;
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
     border: 2px solid currentColor;
     border-right-color: transparent;
     border-radius: 50%;

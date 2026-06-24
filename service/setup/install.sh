@@ -201,6 +201,7 @@ Requires=pipewire-system.service pipewire-pulse-system.socket
 User=$SERVICE_USER
 Group=audio
 Environment=PIPEWIRE_RUNTIME_DIR=/run/pipewire
+Environment=PULSE_RUNTIME_PATH=/run/pipewire
 ExecStart=/usr/bin/pipewire-pulse
 Restart=on-failure
 RestartSec=2

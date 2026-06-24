@@ -1,89 +1,100 @@
 package audio
 
+// NOTE: The RTP sink implementation was migrated from pactl (module-rtp-send via
+// pipewire-pulse) to a native pw-cli persistent-subprocess approach. pactl was found
+// to crash pipewire-pulse on connection (libpulse 17.0 / PipeWire 1.4.2 protocol
+// mismatch). The module lifecycle is now tied to a pw-cli process: load on satellite
+// connect, kill process on disconnect. This is a deliberate behaviour change.
+
 import (
+	"strings"
 	"testing"
 )
 
-func TestParseModuleID(t *testing.T) {
+func TestRTPSinkPayload(t *testing.T) {
+	cases := []struct {
+		destIP string
+		port   int
+		checks []string
+	}{
+		{
+			destIP: "192.168.1.2",
+			port:   9001,
+			checks: []string{
+				"libpipewire-module-rtp-sink",
+				`"destination.ip":"192.168.1.2"`,
+				`"destination.port":9001`,
+				`"audio.format":"S16BE"`,
+				`"audio.channels":2`,
+				`"audio.rate":48000`,
+				`"source.name":"main-mix.monitor"`,
+			},
+		},
+		{
+			destIP: "10.0.0.5",
+			port:   9002,
+			checks: []string{
+				`"destination.ip":"10.0.0.5"`,
+				`"destination.port":9002`,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		got := rtpSinkPayload(tc.destIP, tc.port)
+		for _, want := range tc.checks {
+			if !strings.Contains(got, want) {
+				t.Errorf("rtpSinkPayload(%q, %d): missing %q in %q", tc.destIP, tc.port, want, got)
+			}
+		}
+	}
+}
+
+func TestParseModuleRef(t *testing.T) {
 	cases := []struct {
 		name    string
 		output  string
-		want    int
+		want    string
 		wantErr bool
 	}{
 		{
-			name:   "clean integer with newline",
-			output: "42\n",
-			want:   42,
+			name:   "simple ref",
+			output: "1 = @module:22\n",
+			want:   "@module:22",
 		},
 		{
-			name:   "trailing spaces",
-			output: "42   \n",
-			want:   42,
+			name:   "with prompt prefix",
+			output: ">> load-module libpipewire-module-rtp-sink ...\n1 = @module:5\n",
+			want:   "@module:5",
 		},
 		{
-			name:   "leading spaces",
-			output: "  42\n",
-			want:   42,
+			name:   "large module number",
+			output: "1 = @module:9999\n",
+			want:   "@module:9999",
 		},
 		{
-			name:   "no trailing newline",
-			output: "7",
-			want:   7,
+			name:   "with surrounding noise",
+			output: "remote 0 is named 'pipewire-0'\n1 = @module:3\nError: \"unsupported type\"\n",
+			want:   "@module:3",
 		},
 		{
-			name:   "warning prefix then integer",
-			output: "W: [pipewire] some system notification\n42\n",
-			want:   42,
-		},
-		{
-			name:   "multiple warning lines then integer",
-			output: "W: pulse compat warn\npipewire graph changed\n99\n",
-			want:   99,
-		},
-		{
-			name:   "large module ID",
-			output: "99999\n",
-			want:   99999,
-		},
-		{
-			name:   "integer zero",
-			output: "0\n",
-			want:   0,
+			name:    "no module ref",
+			output:  "Error: module not found\n",
+			wantErr: true,
 		},
 		{
 			name:    "empty output",
 			output:  "",
 			wantErr: true,
 		},
-		{
-			name:    "only whitespace",
-			output:  "   \n   \n",
-			wantErr: true,
-		},
-		{
-			name:    "only warning lines no integer",
-			output:  "W: pipewire warning\nWARN: something else\n",
-			wantErr: true,
-		},
-		{
-			name:    "text without integer",
-			output:  "some random text\nanother line\n",
-			wantErr: true,
-		},
-		{
-			name:   "integer after blank line",
-			output: "\n\n17\n",
-			want:   17,
-		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseModuleID([]byte(tc.output))
+			got, err := parseModuleRef([]byte(tc.output))
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("want error, got id=%d", got)
+					t.Fatalf("want error, got ref=%q", got)
 				}
 				return
 			}
@@ -91,26 +102,8 @@ func TestParseModuleID(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got != tc.want {
-				t.Fatalf("got %d, want %d", got, tc.want)
+				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestParseOrphanRTPModules(t *testing.T) {
-	output := `0 module-device-restore
-14 module-rtp-send source=main-mix.monitor destination_ip=192.168.1.51 port=9001 format=s16be channels=2 rate=48000
-15 module-rtp-send source=main-mix.monitor destination_ip=192.168.1.52 port=9002 format=s16be channels=2 rate=48000
-16 module-rtp-send source=main-mix.monitor destination_ip=192.168.1.53 port=9001 format=s16be channels=2 rate=48000
-`
-	got := parseOrphanRTPModules([]byte(output), 9001)
-	want := []int{14, 16}
-	if len(got) != len(want) {
-		t.Fatalf("got len %d, want %d", len(got), len(want))
-	}
-	for i, v := range got {
-		if v != want[i] {
-			t.Fatalf("got[%d]=%d, want %d", i, v, want[i])
-		}
 	}
 }

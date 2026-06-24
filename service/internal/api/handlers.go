@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -294,6 +295,16 @@ func (w *statusWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.ResponseWriter.(http.Hijacker).Hijack()
+}
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (s *server) routes() {
 	mux := s.mux
 	mux.Handle("/", staticHandler())
@@ -472,6 +483,15 @@ func (s *server) handleScan(w http.ResponseWriter, r *http.Request) {
 	})
 	defer stop()
 
+	// Flush 200 + headers before the scan so reverse proxies with a short
+	// ResponseHeaderTimeout (e.g. the master's node proxy) don't time out
+	// waiting for headers while the scan is running.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
 	s.dbg("scan: starting %ds scan (paused loopbacks for %v)", body.TimeoutSec, activeMacs)
 	scanErr := s.bt.Scan(r.Context(), time.Duration(body.TimeoutSec)*time.Second)
 	s.dbg("scan: finished, err=%v", scanErr)
@@ -487,7 +507,7 @@ func (s *server) handleScan(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.paused = false
 		s.mu.Unlock()
-		http.Error(w, scanErr.Error(), http.StatusInternalServerError)
+		json.NewEncoder(w).Encode([]any{})
 		return
 	}
 	devs, err := s.bt.Devices(r.Context())
@@ -495,10 +515,9 @@ func (s *server) handleScan(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.paused = false
 		s.mu.Unlock()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		json.NewEncoder(w).Encode([]any{})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(devs)
 }
 

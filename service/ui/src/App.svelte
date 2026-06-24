@@ -305,7 +305,7 @@
   .content-container {
     max-width: 800px;
     margin: 0 auto;
-    padding: 0 16px 40px;
+    padding: 0 8px 40px;
   }
   .nodes-container {
     margin-top: 16px;

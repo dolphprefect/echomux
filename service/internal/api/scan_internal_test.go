@@ -17,6 +17,8 @@ import (
 
 // TestHandleScan_UnpausesOnScanError verifies that s.paused is reset to false
 // when Scan() itself returns an error (not just the subsequent Devices() call).
+// NOTE: the handler flushes 200 before the scan runs so the response is always
+// 200 — errors are signalled by an empty array body, not a 5xx status.
 func TestHandleScan_UnpausesOnScanError(t *testing.T) {
 	btMgr := bluetooth.NewMockManager()
 	btMgr.SetScanErr(errors.New("hci0 down"))
@@ -42,7 +44,7 @@ func TestHandleScan_UnpausesOnScanError(t *testing.T) {
 
 	s.handleScan(w, req)
 
-	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
 	s.mu.Lock()
 	paused := s.paused
 	s.mu.Unlock()
@@ -114,7 +116,7 @@ func TestHandleScan_UnpausesOnDevicesError(t *testing.T) {
 
 	s.handleScan(w, req)
 
-	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
 	s.mu.Lock()
 	paused := s.paused
 	s.mu.Unlock()

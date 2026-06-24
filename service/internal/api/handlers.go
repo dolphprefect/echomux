@@ -31,6 +31,8 @@ type server struct {
 	mode       Mode
 	name       string
 	masterAddr string
+	selfAddr   string // satellite only: public host:port reported in register message
+	clientCtx  context.Context
 	rtpPort    int
 
 	nodes             *nodeRegistry
@@ -52,6 +54,7 @@ type server struct {
 	debug             bool
 	saveTimerMu       sync.Mutex
 	saveTimer         *time.Timer              // debounces rapid saveState calls
+	satPushCh         chan struct{}
 }
 
 func (s *server) dbg(format string, args ...any) {
@@ -63,13 +66,19 @@ func (s *server) dbg(format string, args ...any) {
 // Option configures a server.
 type Option func(*server)
 
-func WithStateFile(path string) Option  { return func(s *server) { s.stateFile = path } }
-func WithSpawn(fn SpawnFn) Option       { return func(s *server) { s.spawn = fn } }
-func WithDebug(debug bool) Option       { return func(s *server) { s.debug = debug } }
-func WithMode(m Mode) Option            { return func(s *server) { s.mode = m } }
-func WithName(n string) Option          { return func(s *server) { s.name = n } }
-func WithMasterAddr(addr string) Option { return func(s *server) { s.masterAddr = addr } }
-func WithRTPPort(port int) Option       { return func(s *server) { s.rtpPort = port } }
+func WithStateFile(path string) Option      { return func(s *server) { s.stateFile = path } }
+func WithSpawn(fn SpawnFn) Option           { return func(s *server) { s.spawn = fn } }
+func WithDebug(debug bool) Option           { return func(s *server) { s.debug = debug } }
+func WithMode(m Mode) Option                { return func(s *server) { s.mode = m } }
+func WithName(n string) Option              { return func(s *server) { s.name = n } }
+func WithMasterAddr(addr string) Option     { return func(s *server) { s.masterAddr = addr } }
+func WithRTPPort(port int) Option           { return func(s *server) { s.rtpPort = port } }
+func WithSelfAddr(addr string) Option       { return func(s *server) { s.selfAddr = addr } }
+
+// WithClientContext provides a context for the satellite client goroutine.
+// The satellite client is only started when this option is set and mode is satellite.
+// Pass the application's signal context from main; pass a test-cancellable context in tests.
+func WithClientContext(ctx context.Context) Option { return func(s *server) { s.clientCtx = ctx } }
 
 // WithHeartbeat overrides the default heartbeat intervals — intended for tests.
 func WithHeartbeat(interval, pongTimeout time.Duration) Option {
@@ -105,6 +114,7 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 		rtpPort:           9001,
 		heartbeatInterval: 10 * time.Second,
 		pongTimeout:       5 * time.Second,
+		satPushCh:         make(chan struct{}, 1),
 	}
 	for _, o := range opts {
 		o(s)
@@ -127,6 +137,9 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 	s.routes()
 	go s.hub.RunEventForwarder(context.Background(), bt.Events())
 	s.startAutoRouter(context.Background(), 2*time.Second)
+	if s.mode == ModeSatellite && s.masterAddr != "" && s.clientCtx != nil {
+		go s.runSatelliteClient(s.clientCtx)
+	}
 	go s.startupConnect(context.Background())
 	return s.mux
 }
@@ -225,6 +238,16 @@ func (s *server) saveStateDebounced() {
 	}
 	s.saveTimer = time.AfterFunc(200*time.Millisecond, s.saveState)
 	s.saveTimerMu.Unlock()
+}
+
+func (s *server) triggerSatellitePush() {
+	if s.mode != ModeSatellite {
+		return
+	}
+	select {
+	case s.satPushCh <- struct{}{}:
+	default:
+	}
 }
 
 func copyIntMap(m map[string]int) map[string]int {
@@ -640,6 +663,7 @@ func (s *server) handleForget(w http.ResponseWriter, r *http.Request) {
 	delete(s.watchdogRestarts, mac)
 	s.mu.Unlock()
 	s.saveStateDebounced()
+	s.triggerSatellitePush()
 
 	// Best-effort disconnect before removing from BlueZ.
 	_ = s.bt.Disconnect(r.Context(), mac)
@@ -702,6 +726,7 @@ func (s *server) handleVolume(w http.ResponseWriter, r *http.Request) {
 	s.volumes[mac] = body.Level
 	s.mu.Unlock()
 	s.saveStateDebounced()
+	s.triggerSatellitePush()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -746,6 +771,7 @@ func (s *server) handleMute(w http.ResponseWriter, r *http.Request) {
 	s.mutes[mac] = body.Muted
 	s.mu.Unlock()
 	s.saveStateDebounced()
+	s.triggerSatellitePush()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -781,6 +807,7 @@ func (s *server) handleDelay(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	s.saveStateDebounced()
+	s.triggerSatellitePush()
 	w.WriteHeader(http.StatusNoContent)
 }
 

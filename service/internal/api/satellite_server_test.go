@@ -78,6 +78,44 @@ func TestSatelliteRegister(t *testing.T) {
 	assert.Equal(t, "kitchen", msg["id"])
 }
 
+func TestSatelliteRegister_ResolvesEmptyOrPortAddr(t *testing.T) {
+	ts, _ := newMasterServer(t)
+	defer ts.Close()
+
+	// Register with only a port.
+	conn := dialNodes(t, ts)
+	defer conn.CloseNow()
+
+	sendMsg(t, conn, map[string]any{
+		"type": "register",
+		"name": "Kitchen",
+		"addr": ":56644",
+	})
+
+	msg := readMsg(t, conn)
+	assert.Equal(t, "registered", msg["type"])
+
+	// Check resolved address via GET /nodes.
+	resp, err := http.Get(ts.URL + "/nodes")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	var nodes []map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&nodes))
+	require.Len(t, nodes, 2)
+
+	var found bool
+	for _, n := range nodes {
+		if n["id"] == "kitchen" {
+			addr := n["addr"].(string)
+			// It should contain loopback IP and port 56644.
+			assert.Contains(t, addr, "127.0.0.1:56644")
+			found = true
+		}
+	}
+	assert.True(t, found, "kitchen satellite not found in nodes list")
+}
+
 func TestSatelliteRegister_EmptyNameRejected(t *testing.T) {
 	ts, _ := newMasterServer(t)
 	defer ts.Close()

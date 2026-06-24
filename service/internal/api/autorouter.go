@@ -227,8 +227,12 @@ func (s *server) startLoopback(mac, nodeName string) {
 		s.dbg("loopback %s (%s) pid=%d EXITED: err=%q stderr=%q",
 			mac, nodeName, pid, errStr, stderrStr)
 		s.hub.broadcast(context.Background(), map[string]string{"type": "loopback_stopped", "mac": mac})
+		s.triggerSatellitePush()
 	}()
-	go s.hub.broadcast(context.Background(), map[string]string{"type": "loopback_started", "mac": mac})
+	go func() {
+		s.hub.broadcast(context.Background(), map[string]string{"type": "loopback_started", "mac": mac})
+		s.triggerSatellitePush()
+	}()
 	// Re-apply stored volume and mute after the PW node registers (~1 s).
 	// Mute is always applied (defaults false) to override any AVRCP-reported
 	// mute state that WirePlumber may set on the PW node when the device connects.

@@ -48,6 +48,7 @@ func main() {
 	modeStr    := flag.String("mode",        envOr("ECHOMUX_MODE",        "standalone"),  "operating mode: standalone | master | satellite")
 	name       := flag.String("name",        envOr("ECHOMUX_NAME",        defaultName()), "node display name shown in the UI")
 	masterAddr := flag.String("master-addr", envOr("ECHOMUX_MASTER_ADDR", ""),            "satellite only: host:port of the master echomux")
+	selfAddr   := flag.String("self-addr",   envOr("ECHOMUX_SELF_ADDR",   ""),            "satellite only: public host:port reported to master for HTTP proxy (e.g. 192.168.1.10:56644)")
 	rtpPort    := flag.Int("rtp-port",       9001,                                         "master only: UDP port for RTP unicast to satellites (must match satellite pipewire config)")
 	flag.Parse()
 
@@ -78,7 +79,9 @@ func main() {
 		api.WithMode(mode),
 		api.WithName(*name),
 		api.WithMasterAddr(*masterAddr),
+		api.WithSelfAddr(*selfAddr),
 		api.WithRTPPort(*rtpPort),
+		api.WithClientContext(ctx),
 	)
 
 	httpSrv := &http.Server{Addr: *addr, Handler: srv}

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -46,7 +47,9 @@ func slugify(name string) string {
 }
 
 // writeNode sends a JSON message with a 5 s write deadline.
-func writeNode(ctx context.Context, conn *websocket.Conn, msg nodeWsMsg) error {
+func writeNode(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, msg nodeWsMsg) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, wsSendTimeout)
 	defer cancel()
 	return wsjson.Write(ctx, conn, msg)
@@ -106,6 +109,24 @@ func (s *server) handleSatelliteConn(w http.ResponseWriter, r *http.Request) {
 
 	nodeID := slugify(regMsg.Name)
 
+	// Resolve/sanitize register address using remote IP.
+	satIP, satPort, err := net.SplitHostPort(regMsg.Addr)
+	if err != nil {
+		if regMsg.Addr != "" && regMsg.Addr[0] == ':' {
+			satPort = regMsg.Addr[1:]
+		} else {
+			satPort = "56644"
+		}
+		if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			satIP = ip
+		}
+	} else if satIP == "" || satIP == "0.0.0.0" || satIP == "::" {
+		if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			satIP = ip
+		}
+	}
+	regMsg.Addr = net.JoinHostPort(satIP, satPort)
+
 	// Dirty reconnect / duplicate name guard.
 	staleModuleID, accept := s.nodes.prepareRegistration(nodeID)
 	if !accept {
@@ -117,7 +138,6 @@ func (s *server) handleSatelliteConn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Provision RTP unicast sink from Master to Satellite.
-	satIP, _, _ := net.SplitHostPort(regMsg.Addr)
 	var rtpModuleID int
 	if satIP != "" {
 		rtpModuleID, err = s.audio.AddRTPSink(r.Context(), satIP, s.rtpPort)
@@ -131,7 +151,9 @@ func (s *server) handleSatelliteConn(w http.ResponseWriter, r *http.Request) {
 
 	s.nodes.commit(nodeID, regMsg.Name, regMsg.Addr, rtpModuleID, connCancel)
 
-	if err := writeNode(connCtx, conn, nodeWsMsg{Type: "registered", ID: nodeID}); err != nil {
+	writeMu := &sync.Mutex{}
+
+	if err := writeNode(connCtx, conn, writeMu, nodeWsMsg{Type: "registered", ID: nodeID}); err != nil {
 		connCancel()
 		// satellite_online was not broadcast yet — clean up silently (no offline event).
 		s.nodes.setOffline(nodeID)
@@ -149,16 +171,16 @@ func (s *server) handleSatelliteConn(w http.ResponseWriter, r *http.Request) {
 
 	// Run heartbeat and periodic full-push timer concurrently.
 	pongCh := make(chan struct{}, 1)
-	go s.satelliteHeartbeat(connCtx, connCancel, conn, pongCh, nodeID)
-	go s.satelliteSyncTimer(connCtx, conn)
+	go s.satelliteHeartbeat(connCtx, connCancel, conn, writeMu, pongCh, nodeID)
+	go s.satelliteSyncTimer(connCtx, conn, writeMu)
 
-	s.satelliteReadLoop(connCtx, conn, nodeID, pongCh)
+	s.satelliteReadLoop(connCtx, conn, writeMu, nodeID, pongCh)
 
 	connCancel()
 	s.endSatelliteSession(nodeID, rtpModuleID, regMsg.Name)
 }
 
-func (s *server) satelliteHeartbeat(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, pongCh <-chan struct{}, nodeID string) {
+func (s *server) satelliteHeartbeat(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, writeMu *sync.Mutex, pongCh <-chan struct{}, nodeID string) {
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
 	for {
@@ -166,7 +188,7 @@ func (s *server) satelliteHeartbeat(ctx context.Context, cancel context.CancelFu
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := writeNode(ctx, conn, nodeWsMsg{Type: "ping"}); err != nil {
+			if err := writeNode(ctx, conn, writeMu, nodeWsMsg{Type: "ping"}); err != nil {
 				cancel()
 				return
 			}
@@ -187,7 +209,7 @@ func (s *server) satelliteHeartbeat(ctx context.Context, cancel context.CancelFu
 	}
 }
 
-func (s *server) satelliteSyncTimer(ctx context.Context, conn *websocket.Conn) {
+func (s *server) satelliteSyncTimer(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex) {
 	ticker := time.NewTicker(fullPushInterval)
 	defer ticker.Stop()
 	for {
@@ -195,12 +217,12 @@ func (s *server) satelliteSyncTimer(ctx context.Context, conn *websocket.Conn) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_ = writeNode(ctx, conn, nodeWsMsg{Type: "request_sync"})
+			_ = writeNode(ctx, conn, writeMu, nodeWsMsg{Type: "request_sync"})
 		}
 	}
 }
 
-func (s *server) satelliteReadLoop(ctx context.Context, conn *websocket.Conn, nodeID string, pongCh chan<- struct{}) {
+func (s *server) satelliteReadLoop(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, nodeID string, pongCh chan<- struct{}) {
 	for {
 		var msg nodeWsMsg
 		if err := wsjson.Read(ctx, conn, &msg); err != nil {
@@ -217,7 +239,7 @@ func (s *server) satelliteReadLoop(ctx context.Context, conn *websocket.Conn, no
 		case "event":
 			gap := s.nodes.applyDeltaEvent(nodeID, msg.MAC, msg.Event, msg.Seq)
 			if gap {
-				_ = writeNode(ctx, conn, nodeWsMsg{Type: "request_sync"})
+				_ = writeNode(ctx, conn, writeMu, nodeWsMsg{Type: "request_sync"})
 			} else {
 				go s.hub.broadcast(ctx, map[string]any{
 					"type":    msg.Event,

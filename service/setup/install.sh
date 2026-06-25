@@ -223,9 +223,12 @@ else
         "https://www.kernel.org/pub/linux/bluetooth/${TARBALL}"
     tar xf "/tmp/${TARBALL}" -C /tmp
     cd "/tmp/bluez-${BLUEZ_VER}"
-    UDEVDIR=$(pkg-config --variable=udevdir udev 2>/dev/null || echo /usr/lib/udev)
-    SYSTEMD_SYSTEM=$(pkg-config --variable=systemdsystemunitdir libsystemd 2>/dev/null || echo /usr/lib/systemd/system)
-    SYSTEMD_USER=$(pkg-config --variable=systemduserunitdir libsystemd 2>/dev/null || echo /usr/lib/systemd/user)
+    UDEVDIR=$(pkg-config --variable=udevdir udev 2>/dev/null || true)
+    UDEVDIR=${UDEVDIR:-/usr/lib/udev}
+    SYSTEMD_SYSTEM=$(pkg-config --variable=systemdsystemunitdir libsystemd 2>/dev/null || true)
+    SYSTEMD_SYSTEM=${SYSTEMD_SYSTEM:-/usr/lib/systemd/system}
+    SYSTEMD_USER=$(pkg-config --variable=systemduserunitdir libsystemd 2>/dev/null || true)
+    SYSTEMD_USER=${SYSTEMD_USER:-/usr/lib/systemd/user}
     ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
         --with-udevdir="${UDEVDIR}" \
         --with-systemdsystemunitdir="${SYSTEMD_SYSTEM}" \

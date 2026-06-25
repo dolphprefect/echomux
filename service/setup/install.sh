@@ -53,32 +53,25 @@ if printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then
 else
     echo "==> BlueZ $BLUEZ_GOT is too old (< $BLUEZ_MIN). Building latest BlueZ from source..."
 
-    # Fresh Pi OS images often ship with only the Raspberry Pi archive
-    # (archive.raspberrypi.com), which has runtime libs but not -dev packages
-    # or build tools. Ensure the Debian main archive is present first.
-    CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")
-    if ! apt-cache show build-essential >/dev/null 2>&1; then
-        echo "==> Debian main archive missing from apt sources — adding ${CODENAME}..."
-        if [ -f /etc/apt/sources.list.d/debian.sources ]; then
-            grep -q 'deb.debian.org' /etc/apt/sources.list.d/debian.sources || \
-            cat >> /etc/apt/sources.list.d/debian.sources << EOF
-
-Types: deb
-URIs: http://deb.debian.org/debian
-Suites: ${CODENAME} ${CODENAME}-updates
-Components: main contrib non-free non-free-firmware
-
-Types: deb
-URIs: http://security.debian.org/debian-security
-Suites: ${CODENAME}-security
-Components: main
-EOF
-        else
-            grep -q 'deb.debian.org' /etc/apt/sources.list 2>/dev/null || \
-            printf 'deb http://deb.debian.org/debian %s main contrib non-free\ndeb http://security.debian.org/debian-security %s-security main\n' \
-                "${CODENAME}" "${CODENAME}" >> /etc/apt/sources.list
+    # Pi OS ships debian.sources with separate "Types: deb" and "Types: deb-src"
+    # lines in the same Deb822 stanza. In that format duplicate keys overwrite,
+    # so deb-src wins and apt only fetches source indexes — no binary packages.
+    # Fix it to "Types: deb deb-src" before anything else.
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then
+        if grep -q $'^Types: deb\nTypes: deb-src' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+           python3 -c "
+import sys
+t = open('/etc/apt/sources.list.d/debian.sources').read()
+sys.exit(0 if 'Types: deb\nTypes: deb-src' in t else 1)
+" 2>/dev/null; then
+            echo "==> Fixing malformed debian.sources (duplicate Types lines)..."
+            python3 -c "
+t = open('/etc/apt/sources.list.d/debian.sources').read()
+t = t.replace('Types: deb\nTypes: deb-src', 'Types: deb deb-src')
+open('/etc/apt/sources.list.d/debian.sources', 'w').write(t)
+"
+            apt-get update -qq
         fi
-        apt-get update -qq
     fi
 
     # Install compile-time deps directly rather than via 'apt-get build-dep bluez'.
@@ -98,7 +91,13 @@ EOF
         "https://www.kernel.org/pub/linux/bluetooth/${TARBALL}"
     tar xf "/tmp/${TARBALL}" -C /tmp
     cd "/tmp/bluez-${BLUEZ_VER}"
+    UDEVDIR=$(pkg-config --variable=udevdir udev 2>/dev/null || echo /usr/lib/udev)
+    SYSTEMD_SYSTEM=$(pkg-config --variable=systemdsystemunitdir libsystemd 2>/dev/null || echo /usr/lib/systemd/system)
+    SYSTEMD_USER=$(pkg-config --variable=systemduserunitdir libsystemd 2>/dev/null || echo /usr/lib/systemd/user)
     ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+        --with-udevdir="${UDEVDIR}" \
+        --with-systemdsystemunitdir="${SYSTEMD_SYSTEM}" \
+        --with-systemduserunitdir="${SYSTEMD_USER}" \
         --disable-manpages --disable-testing
     make -j"$(nproc)"
     make install

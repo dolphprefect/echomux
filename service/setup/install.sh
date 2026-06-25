@@ -53,10 +53,37 @@ if printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then
 else
     echo "==> BlueZ $BLUEZ_GOT is too old (< $BLUEZ_MIN). Building latest BlueZ from source..."
 
+    # Fresh Pi OS images often ship with only the Raspberry Pi archive
+    # (archive.raspberrypi.com), which has runtime libs but not -dev packages
+    # or build tools. Ensure the Debian main archive is present first.
+    CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")
+    if ! apt-cache show build-essential >/dev/null 2>&1; then
+        echo "==> Debian main archive missing from apt sources — adding ${CODENAME}..."
+        if [ -f /etc/apt/sources.list.d/debian.sources ]; then
+            grep -q 'deb.debian.org' /etc/apt/sources.list.d/debian.sources || \
+            cat >> /etc/apt/sources.list.d/debian.sources << EOF
+
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: ${CODENAME} ${CODENAME}-updates
+Components: main contrib non-free non-free-firmware
+
+Types: deb
+URIs: http://security.debian.org/debian-security
+Suites: ${CODENAME}-security
+Components: main
+EOF
+        else
+            grep -q 'deb.debian.org' /etc/apt/sources.list 2>/dev/null || \
+            printf 'deb http://deb.debian.org/debian %s main contrib non-free\ndeb http://security.debian.org/debian-security %s-security main\n' \
+                "${CODENAME}" "${CODENAME}" >> /etc/apt/sources.list
+        fi
+        apt-get update -qq
+    fi
+
     # Install compile-time deps directly rather than via 'apt-get build-dep bluez'.
     # build-dep pulls in Debian packaging tools (debhelper-compat, check, python3-docutils)
-    # that are often uninstallable on Raspberry Pi OS, causing the whole command to fail
-    # even though the actual compiler deps are available.
+    # that are often uninstallable on Raspberry Pi OS.
     apt-get install -y --no-install-recommends \
         build-essential pkg-config autoconf automake libtool \
         flex bison libdbus-1-dev libglib2.0-dev libudev-dev \

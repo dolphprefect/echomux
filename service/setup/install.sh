@@ -444,7 +444,8 @@ curl -fsSL "${RAW_BASE}/service/echomux.service" \
     | sed "s/REPLACE_USER/$SERVICE_USER/" \
     > /etc/systemd/system/echomux.service
 systemctl daemon-reload
-systemctl enable echomux.service
+systemctl enable --now echomux.service
+systemctl restart echomux.service
 
 # ---------------------------------------------------------------------------
 # 11. Bluetooth main.conf: disable Pi-side reconnect (speakers reconnect to us)
@@ -492,12 +493,17 @@ else
         > /usr/local/bin/librespot-pipewire.sh
     chmod +x /usr/local/bin/librespot-pipewire.sh
 
+    echo "==> Creating librespot credential cache directory..."
+    mkdir -p /var/cache/librespot
+    chown "$SERVICE_USER:$SERVICE_USER" /var/cache/librespot
+
     echo "==> Installing librespot.service..."
     curl -fsSL "${RAW_BASE}/service/setup/librespot.service" \
         | sed "s/REPLACE_USER/$SERVICE_USER/" \
         > /etc/systemd/system/librespot.service
     systemctl daemon-reload
     systemctl enable --now librespot.service
+    systemctl restart librespot.service
 fi
 
 # ---------------------------------------------------------------------------

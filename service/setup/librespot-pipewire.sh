@@ -6,6 +6,7 @@ export PIPEWIRE_PROPS='{"node.dont-move":true}'
 exec /usr/local/bin/librespot \
   --name "${ECHOMUX_SPOTIFY_NAME:-echomux}" \
   --backend pipe \
+  --system-cache /var/cache/librespot \
   --initial-volume 100 \
   --bitrate 320 \
   --disable-audio-cache \

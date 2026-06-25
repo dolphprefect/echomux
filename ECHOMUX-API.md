@@ -397,14 +397,14 @@ Used by the satellite process to register with the master. Not intended for UI c
 
 `addr` is the satellite's public `host:port` for HTTP proxy. If omitted or port-only (`:56644`), the master derives the IP from the connection's remote address.
 
-2. Master replies with an `rtp_config` message:
+2. Master replies with a `registered` message:
 
 ```json
-{ "type": "rtp_config", "rtp_port": 9001 }
+{ "type": "registered", "id": "bedroom" }
 ```
 
-The satellite configures its PipeWire RTP source to receive on this port.
+`id` is the URL-safe slug derived from the satellite's name (used in `/nodes/{id}/...` proxy paths).
 
-3. The connection stays open as a heartbeat. The master broadcasts `satellite_online` to `/events` clients. The master sends periodic `devices_push` messages to keep satellite device state cached for `GET /devices` aggregation. The satellite sends BT events upstream as `event` messages so they can be re-broadcast to `/events` clients on the master.
+3. The connection stays open as a heartbeat. The master broadcasts `satellite_online` to `/events` clients. The satellite's device list is cached on the master (pushed after registration and updated via delta events) for `GET /devices` aggregation. The satellite sends BT events upstream as `event` messages so they can be re-broadcast to `/events` clients on the master.
 
 4. When the connection closes, the master marks the node offline and broadcasts `satellite_offline` to all `/events` clients.

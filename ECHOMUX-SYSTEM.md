@@ -78,7 +78,7 @@ Each satellite dials `ws://<master>:56644/nodes` on startup and sends a `registe
 
 1. Assigns or derives a node ID (slugified name)
 2. Spawns a `libpipewire-module-rtp-sink` via a persistent `pw-cli` subprocess pointing at the satellite's IP
-3. Sends `{"type":"rtp_config","rtp_port":9001}` back to the satellite
+3. Sends `{"type":"registered","id":"<node-id>"}` back to the satellite
 4. Broadcasts `satellite_online` to all `/events` WebSocket clients
 
 The WebSocket connection stays open as a heartbeat. The master caches the satellite's device list (refreshed periodically) for `GET /devices` aggregation. BT events from the satellite are forwarded upstream to `/events`.
@@ -155,7 +155,7 @@ Custom config files installed to `/etc/pipewire/pipewire.conf.d/`:
 
 | File | Purpose |
 |---|---|
-| `10-rtp-source.conf` | Creates the `rtp-source` node — receives raw PCM from librespot (standalone/satellite) or from the master RTP sink (satellite mode) via UDP on port 9001 |
+| `10-rtp-source.conf` | Intentionally empty — the `rtp-source` module is loaded dynamically by echomux via `pw-cli` on each master session reconnect. A static module here would hold stale PipeWire session state across master restarts |
 | `20-main-mix-loopback.conf` | Creates the `main-mix` virtual sink that aggregates audio before fanning out to speakers |
 
 ### Why main-mix
@@ -235,8 +235,10 @@ sudo systemctl start echomux
 | `make ui` | Build the Svelte frontend → `service/internal/api/static/` |
 | `make build` | Build UI, then compile Go binary |
 | `make install` | Build, stop service, install binary, start service |
-| `make deploy` | Alias for `make install` — deploys to the local (master) Pi |
-| `make deploy-satellite` | Build and deploy to the satellite Pi via SSH (configured in `Makefile.local`) |
+| `make deploy` | Alias for `make install` — deploys to the local Pi |
+| `make deploy-master` | Build and deploy to the master Pi (defined in `Makefile.local`) |
+| `make deploy-satellite` | Build and deploy to the satellite Pi via SSH (defined in `Makefile.local`) |
+| `make deploy-all` | Build and deploy to both master and satellite in one shot (defined in `Makefile.local`) |
 
 ### Satellite configuration file
 
@@ -286,7 +288,7 @@ echomux/
 │   │   ├── 51-bluetooth-roles.conf  — WirePlumber BT role config
 │   │   ├── 52-bt-isolation.conf     — WirePlumber BT latency buffer
 │   │   ├── 20-main-mix-loopback.conf — PipeWire main-mix virtual sink
-│   │   └── 10-rtp-source.conf       — PipeWire RTP source (UDP 9001)
+│   │   └── 10-rtp-source.conf       — intentionally empty; rtp-source loaded dynamically by echomux
 │   └── vendor/                      — vendored Go deps (go-bluetooth, patched)
 ├── Makefile
 ├── README.md

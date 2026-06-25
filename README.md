@@ -23,7 +23,8 @@ Open the web UI on your phone, connect your speakers, and pick **echomux** as th
 
 **Tested on:**
 
-- Raspberry Pi 5 (8 GB)
+- Raspberry Pi 5 (8 GB) — master
+- Raspberry Pi 4 (4 GB) — satellite
 - Raspberry Pi OS Bookworm (64-bit, headless)
 - TP-Link UB500 USB Bluetooth 5.0 dongle (optional — better range than the built-in adapter)
 
@@ -50,7 +51,15 @@ Open the web UI on your phone, connect your speakers, and pick **echomux** as th
 curl -fsSL https://raw.githubusercontent.com/dolphprefect/echomux/main/service/setup/install.sh | bash
 ```
 
-The script installs PipeWire, WirePlumber, BlueZ 5.85+, librespot, downloads the pre-built echomux binary from GitHub Releases, and enables all systemd services.
+The script is **interactive** — it will ask:
+
+- **Mode**: `standalone` (single Pi), `master` (multi-room master), or `satellite`
+- **Display name**: shown in the UI (defaults to hostname)
+- **Bluetooth adapter**: which `hciN` adapter to use (auto-detected)
+- **Master address** (satellite mode only): `host:port` of the master Pi
+- **Spotify Connect name** (non-satellite only): how this Pi appears in the Spotify app
+
+The script installs PipeWire, WirePlumber, BlueZ 5.85+, librespot (skipped for satellites), downloads the pre-built echomux binary from GitHub Releases, writes `/etc/echomux/echomux.conf`, and enables all systemd services.
 
 **Reboot after install.** Bluetooth kernel state may be stale before the first reboot.
 
@@ -97,25 +106,13 @@ The satellite is a full echomux instance running in `satellite` mode. It has no 
 
 ### Setting up a satellite
 
-**1. Install echomux on the satellite Pi** (same install script as the master).
-
-**2. Create `/etc/echomux/echomux.conf`** on the satellite:
-
-```ini
-ECHOMUX_MODE=satellite
-ECHOMUX_NAME=bedroom
-ECHOMUX_MASTER_ADDR=192.168.1.3:56644
-ECHOMUX_ADAPTER=hci0
-ECHOMUX_ADDR=:56644
-```
-
-`ECHOMUX_NAME` becomes the node label in the UI. `ECHOMUX_MASTER_ADDR` is the master's IP and port.
-
-**3. Restart the satellite service:**
+**1. Install echomux on the satellite Pi** using the same install script:
 
 ```bash
-sudo systemctl restart echomux
+curl -fsSL https://raw.githubusercontent.com/dolphprefect/echomux/main/service/setup/install.sh | bash
 ```
+
+When prompted, select **satellite** mode and enter the master's `host:port`. The script writes `/etc/echomux/echomux.conf` and enables all services automatically. Reboot after install.
 
 The satellite connects to the master via WebSocket, registers, and appears immediately in the UI under its own section.
 

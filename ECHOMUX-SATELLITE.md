@@ -5,7 +5,7 @@
 Bluetooth Classic range is ~10 m through walls. A single Pi can only serve speakers in its immediate vicinity. The satellite architecture lets additional Pis sit close to remote speakers while sharing a single Spotify Connect endpoint and unified web UI on the Master. A single monolithic binary handles both roles, controlled by runtime flags.
 
 **Design decisions:**
-- **Audio transport:** RTP unicast via `pactl module-rtp-send`. Satellite already has `rtp-source` on :9001 — no audio-side changes needed on the Satellite.
+- **Audio transport:** RTP unicast via `libpipewire-module-rtp-sink`, loaded by a persistent `pw-cli` subprocess on the master (one per satellite). The satellite's `rtp-source` is loaded dynamically by echomux (also via `pw-cli`) before each master session — the static config `10-rtp-source.conf` is intentionally empty to prevent stale session state after master restarts.
 - **Discovery:** `--master-addr` flag. Satellite dials Master on startup. No Avahi browser on Master.
 - **Naming:** `--name` / `ECHOMUX_NAME`. Displayed in UI section headers. Not UI-editable.
 
@@ -21,9 +21,9 @@ librespot ──PCM──▶ main-mix (Master PipeWire)
                        │
            ┌───────────┴──────────────┐
            ▼                          ▼
-     pw-loopback               pactl rtp-send ──UDP:9001──▶ Satellite PipeWire
+     pw-loopback          rtp-sink (pw-cli) ──UDP:9001──▶ Satellite PipeWire
            │                                                       │
-    bluez_output.*                                            rtp-source
+    bluez_output.*                                            rtp-source (pw-cli)
   (Master BT speakers)                                             │
                                                              main-mix
                                                                    │

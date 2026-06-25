@@ -105,10 +105,11 @@ else
         echo "    Adapter: $ECHOMUX_ADAPTER (from env)"
     else
         echo "    Available Bluetooth adapters:"
+        _rfkill=$(rfkill list 2>/dev/null || true)
         for dev in /sys/class/bluetooth/hci*; do
             hci=$(basename "$dev")
-            devtype=$(cat "$dev/device/uevent" 2>/dev/null | grep '^DEVTYPE=' | cut -d= -f2)
-            modalias=$(cat "$dev/device/modalias" 2>/dev/null | cut -d: -f1)
+            devtype=$(grep '^DEVTYPE=' "$dev/device/uevent" 2>/dev/null | cut -d= -f2)
+            modalias=$(cut -d: -f1 "$dev/device/modalias" 2>/dev/null)
             case "$devtype/$modalias" in
                 usb_interface/*|*/usb) bus="USB" ;;
                 */of|of/*)             bus="built-in" ;;
@@ -116,7 +117,7 @@ else
                 */uart|uart/*)         bus="built-in (UART)" ;;
                 *)                     bus="built-in" ;;
             esac
-            blocked=$(rfkill list 2>/dev/null | awk "/^[0-9]+: ${hci}:/{f=1} f && /Soft blocked: yes/{print \"soft-blocked\"; exit} f && /^[0-9]/{exit}")
+            blocked=$(printf '%s\n' "$_rfkill" | awk "/^[0-9]+: ${hci}:/{f=1} f && /Soft blocked: yes/{print \"soft-blocked\"; exit} f && /^[0-9]+: /{exit}")
             info="$bus"
             [[ -n "$blocked" ]] && info="$info, $blocked"
             echo "      $hci  ($info)"

@@ -101,14 +101,27 @@ else
     echo ""
 
     # --- Bluetooth adapter ---
-    BT_ADAPTERS=$(ls /sys/class/bluetooth/ 2>/dev/null | tr '\n' ' ')
     if [[ -n "${ECHOMUX_ADAPTER:-}" ]]; then
         echo "    Adapter: $ECHOMUX_ADAPTER (from env)"
     else
-        if [[ -n "$BT_ADAPTERS" ]]; then
-            echo "    Available adapters: $BT_ADAPTERS"
-        fi
-        ADAPTER_DEFAULT="hci0"
+        echo "    Available Bluetooth adapters:"
+        for dev in /sys/class/bluetooth/hci*; do
+            hci=$(basename "$dev")
+            devtype=$(cat "$dev/device/uevent" 2>/dev/null | grep '^DEVTYPE=' | cut -d= -f2)
+            modalias=$(cat "$dev/device/modalias" 2>/dev/null | cut -d: -f1)
+            case "$devtype/$modalias" in
+                usb_interface/*|*/usb) bus="USB" ;;
+                */of|of/*)             bus="built-in" ;;
+                */sdio|sdio/*)         bus="built-in (SDIO)" ;;
+                */uart|uart/*)         bus="built-in (UART)" ;;
+                *)                     bus="built-in" ;;
+            esac
+            blocked=$(rfkill list 2>/dev/null | awk "/^[0-9]+: ${hci}:/{f=1} f && /Soft blocked: yes/{print \"soft-blocked\"; exit} f && /^[0-9]/{exit}")
+            info="$bus"
+            [[ -n "$blocked" ]] && info="$info, $blocked"
+            echo "      $hci  ($info)"
+        done
+        ADAPTER_DEFAULT=$(ls /sys/class/bluetooth/ 2>/dev/null | head -1 || echo "hci0")
         ECHOMUX_ADAPTER=$(_prompt "    Bluetooth adapter [$ADAPTER_DEFAULT]: " "$ADAPTER_DEFAULT")
     fi
     echo ""

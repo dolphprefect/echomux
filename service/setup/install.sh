@@ -108,8 +108,8 @@ else
         _rfkill=$(rfkill list 2>/dev/null || true)
         for dev in /sys/class/bluetooth/hci*; do
             hci=$(basename "$dev")
-            devtype=$(grep '^DEVTYPE=' "$dev/device/uevent" 2>/dev/null | cut -d= -f2)
-            modalias=$(cut -d: -f1 "$dev/device/modalias" 2>/dev/null)
+            devtype=$(grep '^DEVTYPE=' "$dev/device/uevent" 2>/dev/null | cut -d= -f2 || true)
+            modalias=$(cut -d: -f1 "$dev/device/modalias" 2>/dev/null || true)
             case "$devtype/$modalias" in
                 usb_interface/*|*/usb) bus="USB" ;;
                 */of|of/*)             bus="built-in" ;;

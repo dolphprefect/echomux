@@ -119,7 +119,7 @@ else
             esac
             blocked=$(printf '%s\n' "$_rfkill" | awk "/^[0-9]+: ${hci}:/{f=1} f && /Soft blocked: yes/{print \"soft-blocked\"; exit} f && /^[0-9]+: /{exit}")
             info="$bus"
-            [[ -n "$blocked" ]] && info="$info, $blocked"
+            if [[ -n "$blocked" ]]; then info="$info, $blocked"; fi
             echo "      $hci  ($info)"
         done
         ADAPTER_DEFAULT=$(ls /sys/class/bluetooth/ 2>/dev/null | head -1 || echo "hci0")

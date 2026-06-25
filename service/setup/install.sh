@@ -53,13 +53,14 @@ if printf '%s\n%s\n' "$BLUEZ_MIN" "$BLUEZ_GOT" | sort -V -C; then
 else
     echo "==> BlueZ $BLUEZ_GOT is too old (< $BLUEZ_MIN). Building latest BlueZ from source..."
 
-    # Enable deb-src for build-dep
-    sed -i '/^Types: deb$/a Types: deb-src' /etc/apt/sources.list.d/debian.sources 2>/dev/null \
-        || sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list 2>/dev/null \
-        || true
-    apt-get update -qq
-
-    apt-get build-dep -y bluez
+    # Install compile-time deps directly rather than via 'apt-get build-dep bluez'.
+    # build-dep pulls in Debian packaging tools (debhelper-compat, check, python3-docutils)
+    # that are often uninstallable on Raspberry Pi OS, causing the whole command to fail
+    # even though the actual compiler deps are available.
+    apt-get install -y --no-install-recommends \
+        build-essential pkg-config autoconf automake libtool \
+        flex bison libdbus-1-dev libglib2.0-dev libudev-dev \
+        libreadline-dev libical-dev libjson-c-dev libdw-dev libell-dev
 
     BLUEZ_VER=$(curl -fsSL https://api.github.com/repos/bluez/bluez/releases/latest \
         | grep -oP '"tag_name":\s*"\K[^"]+' \
@@ -70,7 +71,8 @@ else
         "https://www.kernel.org/pub/linux/bluetooth/${TARBALL}"
     tar xf "/tmp/${TARBALL}" -C /tmp
     cd "/tmp/bluez-${BLUEZ_VER}"
-    ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var
+    ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+        --disable-manpages --disable-testing
     make -j"$(nproc)"
     make install
     cd /

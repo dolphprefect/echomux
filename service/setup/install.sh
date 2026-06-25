@@ -29,6 +29,131 @@ fi
 echo "==> Installing for user: $SERVICE_USER"
 
 # ---------------------------------------------------------------------------
+# 0. Interactive setup
+#    Reads from /dev/tty so it works even when the script is piped via curl.
+#    Any parameter can be pre-set as an env var to skip the question.
+# ---------------------------------------------------------------------------
+
+_prompt() {
+    local label="$1" default="$2" reply
+    printf '%s' "$label" >/dev/tty
+    IFS= read -r reply </dev/tty
+    printf '%s' "${reply:-$default}"
+}
+
+_confirm() {
+    local label="$1" default="${2:-y}" reply
+    printf '%s' "$label" >/dev/tty
+    IFS= read -r reply </dev/tty
+    reply="${reply:-$default}"
+    [[ "$reply" =~ ^[Yy] ]]
+}
+
+echo ""
+echo "╔══════════════════════════════════════╗"
+echo "║         echomux setup                ║"
+echo "╚══════════════════════════════════════╝"
+echo ""
+
+# If a config already exists, offer to keep it.
+REUSE_CONF=false
+if [[ -f /etc/echomux/echomux.conf ]]; then
+    if _confirm "    Existing config found. Keep it? [Y/n]: " "y"; then
+        REUSE_CONF=true
+    fi
+fi
+
+if [[ "$REUSE_CONF" == "true" ]]; then
+    # Read existing values so the rest of the script has them.
+    # shellcheck source=/dev/null
+    source /etc/echomux/echomux.conf 2>/dev/null || true
+    MODE="${ECHOMUX_MODE:-standalone}"
+    echo "    Keeping existing config (mode: $MODE)."
+else
+    echo ""
+
+    # --- Mode ---
+    if [[ -n "${ECHOMUX_MODE:-}" ]]; then
+        MODE="$ECHOMUX_MODE"
+        echo "    Mode: $MODE (from env)"
+    else
+        echo "    Modes:"
+        echo "      master     — receives Spotify Connect, streams audio to local and satellite speakers"
+        echo "      satellite  — receives audio from master, drives local Bluetooth speakers"
+        echo "      standalone — single-Pi setup (no satellites)"
+        echo ""
+        while true; do
+            MODE=$(_prompt "    Mode [master/satellite/standalone] (standalone): " "standalone")
+            [[ "$MODE" =~ ^(master|satellite|standalone)$ ]] && break
+            echo "    Please enter master, satellite, or standalone." >/dev/tty
+        done
+    fi
+    export ECHOMUX_MODE="$MODE"
+    echo ""
+
+    # --- Name ---
+    HOSTNAME_DEFAULT=$(hostname -s 2>/dev/null || echo "echomux")
+    if [[ -n "${ECHOMUX_NAME:-}" ]]; then
+        echo "    Name: $ECHOMUX_NAME (from env)"
+    else
+        ECHOMUX_NAME=$(_prompt "    Display name [$HOSTNAME_DEFAULT]: " "$HOSTNAME_DEFAULT")
+    fi
+    echo ""
+
+    # --- Bluetooth adapter ---
+    BT_ADAPTERS=$(ls /sys/class/bluetooth/ 2>/dev/null | tr '\n' ' ')
+    if [[ -n "${ECHOMUX_ADAPTER:-}" ]]; then
+        echo "    Adapter: $ECHOMUX_ADAPTER (from env)"
+    else
+        if [[ -n "$BT_ADAPTERS" ]]; then
+            echo "    Available adapters: $BT_ADAPTERS"
+        fi
+        ADAPTER_DEFAULT="hci0"
+        ECHOMUX_ADAPTER=$(_prompt "    Bluetooth adapter [$ADAPTER_DEFAULT]: " "$ADAPTER_DEFAULT")
+    fi
+    echo ""
+
+    # --- Master address (satellite only) ---
+    if [[ "$MODE" == "satellite" ]]; then
+        if [[ -n "${ECHOMUX_MASTER_ADDR:-}" ]]; then
+            echo "    Master address: $ECHOMUX_MASTER_ADDR (from env)"
+        else
+            while true; do
+                ECHOMUX_MASTER_ADDR=$(_prompt "    Master address (host:port, e.g. 192.168.1.10:56644): " "")
+                [[ -n "$ECHOMUX_MASTER_ADDR" ]] && break
+                echo "    Master address is required for satellite mode." >/dev/tty
+            done
+        fi
+        echo ""
+    fi
+
+    # --- Spotify Connect name (non-satellite only) ---
+    if [[ "$MODE" != "satellite" ]]; then
+        if [[ -n "${ECHOMUX_SPOTIFY_NAME:-}" ]]; then
+            echo "    Spotify name: $ECHOMUX_SPOTIFY_NAME (from env)"
+        else
+            ECHOMUX_SPOTIFY_NAME=$(_prompt "    Spotify Connect name [echomux]: " "echomux")
+        fi
+        echo ""
+    fi
+
+    # --- Summary ---
+    echo "    ── Configuration ──────────────────────"
+    echo "    Mode:    $MODE"
+    echo "    Name:    $ECHOMUX_NAME"
+    echo "    Adapter: $ECHOMUX_ADAPTER"
+    [[ "$MODE" == "satellite" ]] && echo "    Master:  $ECHOMUX_MASTER_ADDR"
+    [[ "$MODE" != "satellite" ]] && echo "    Spotify: $ECHOMUX_SPOTIFY_NAME"
+    echo "    ───────────────────────────────────────"
+    echo ""
+    if ! _confirm "    Proceed with installation? [Y/n]: " "y"; then
+        echo "Aborted." >&2
+        exit 1
+    fi
+    echo ""
+fi
+
+# ---------------------------------------------------------------------------
 # 1. System packages
 # ---------------------------------------------------------------------------
 echo "==> Installing system packages..."
@@ -58,18 +183,11 @@ else
     # so deb-src wins and apt only fetches source indexes — no binary packages.
     # Fix it to "Types: deb deb-src" before anything else.
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then
-        if grep -q $'^Types: deb\nTypes: deb-src' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-           python3 -c "
-import sys
-t = open('/etc/apt/sources.list.d/debian.sources').read()
-sys.exit(0 if 'Types: deb\nTypes: deb-src' in t else 1)
-" 2>/dev/null; then
+        if awk '/^Types: deb$/{f=1;next} f && /^Types: deb-src$/{exit 0} {f=0} END{exit 1}' \
+               /etc/apt/sources.list.d/debian.sources; then
             echo "==> Fixing malformed debian.sources (duplicate Types lines)..."
-            python3 -c "
-t = open('/etc/apt/sources.list.d/debian.sources').read()
-t = t.replace('Types: deb\nTypes: deb-src', 'Types: deb deb-src')
-open('/etc/apt/sources.list.d/debian.sources', 'w').write(t)
-"
+            sed -i '/^Types: deb$/{N; s/^Types: deb\nTypes: deb-src$/Types: deb deb-src/}' \
+                /etc/apt/sources.list.d/debian.sources
             apt-get update -qq
         fi
     fi
@@ -264,31 +382,29 @@ systemctl enable --now pipewire-pulse-system.socket
 systemctl enable --now pipewire-pulse-system.service
 
 # ---------------------------------------------------------------------------
-# 8. echomux config directory and default config file
+# 8. echomux config directory and config file
 # ---------------------------------------------------------------------------
 echo "==> Writing /etc/echomux/echomux.conf..."
 mkdir -p /etc/echomux
 
-# Only write the default config if it doesn't already exist (preserve customisations).
-if [[ ! -f /etc/echomux/echomux.conf ]]; then
-    cat > /etc/echomux/echomux.conf << 'CONF'
-# echomux configuration
-# Restart the service after editing: sudo systemctl restart echomux
-
-# Bluetooth adapter to use. Run 'hciconfig -a' to list available adapters.
-# On Raspberry Pi, hci0 is the built-in adapter. An external USB dongle
-# typically appears as hci1.
-ECHOMUX_ADAPTER=hci0
-
-# HTTP/HTTPS listen address.
-ECHOMUX_ADDR=:56644
-
-# Spotify Connect device name — shown in the Spotify app source picker.
-ECHOMUX_SPOTIFY_NAME=echomux
-
-# Uncomment to enable verbose debug logging.
-# ECHOMUX_DEBUG=true
-CONF
+if [[ "$REUSE_CONF" != "true" ]]; then
+    {
+        echo "# echomux configuration"
+        echo "# Restart the service after editing: sudo systemctl restart echomux"
+        echo ""
+        echo "ECHOMUX_MODE=${MODE}"
+        echo "ECHOMUX_NAME=\"${ECHOMUX_NAME}\""
+        echo "ECHOMUX_ADAPTER=${ECHOMUX_ADAPTER}"
+        echo "ECHOMUX_ADDR=:56644"
+        if [[ "$MODE" == "satellite" ]]; then
+            echo "ECHOMUX_MASTER_ADDR=${ECHOMUX_MASTER_ADDR}"
+        else
+            echo "ECHOMUX_SPOTIFY_NAME=\"${ECHOMUX_SPOTIFY_NAME}\""
+        fi
+        echo ""
+        echo "# Uncomment to enable verbose debug logging."
+        echo "# ECHOMUX_DEBUG=true"
+    } > /etc/echomux/echomux.conf
 fi
 
 # ---------------------------------------------------------------------------
@@ -336,12 +452,6 @@ systemctl enable --now avahi-daemon
 #     the available libc6-dev. raspotify ships a pre-built ARM64 librespot
 #     binary that works on all supported hardware.
 # ---------------------------------------------------------------------------
-# Detect mode from environment or existing config file
-MODE="${ECHOMUX_MODE:-}"
-if [[ -z "$MODE" && -f /etc/echomux/echomux.conf ]]; then
-    MODE=$(grep -oP '^[^#]*ECHOMUX_MODE=\s*\K[a-zA-Z0-9_-]+' /etc/echomux/echomux.conf || echo "")
-fi
-
 if [[ "$MODE" == "satellite" ]]; then
     echo "==> Satellite mode detected ($MODE). Skipping librespot installation."
     if systemctl is-enabled librespot.service &>/dev/null || systemctl is-active librespot.service &>/dev/null; then

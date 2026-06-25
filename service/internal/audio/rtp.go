@@ -32,7 +32,8 @@ func rtpSinkPayload(destIP string, port int) string {
 	return fmt.Sprintf(
 		"load-module libpipewire-module-rtp-sink "+
 			`{"audio.format":"S16BE","audio.channels":2,"audio.rate":48000,`+
-			`"destination.ip":"%s","destination.port":%d,"source.name":"main-mix.monitor"}`,
+			`"destination.ip":"%s","destination.port":%d,`+
+			`"source.name":"rtp-sink","stream.props":{"target.object":"main-mix-source"}}`,
 		destIP, port,
 	)
 }

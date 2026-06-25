@@ -69,7 +69,7 @@
             <polyline points="3,2 7,5 3,8"/>
           </svg>
         </div>
-        <button class="btn-power" on:click={() => dispatch('disconnect', device.MAC)} title="Disconnect" disabled={disabled}>
+        <button class="btn-power" on:click={() => dispatch('disconnect', { mac: device.MAC, nodeId: device.node_id })} title="Disconnect" disabled={disabled}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 3v9"/><path d="M6.2 5.2A8 8 0 1 0 17.8 5.2"/>
           </svg>
@@ -77,13 +77,13 @@
       {:else if isConnecting}
         <span class="connecting-label"><span class="spinner-sm"></span>Connecting…</span>
       {:else}
-        <button class="btn-forget" on:click={() => dispatch('forget', device.MAC)} title="Forget speaker" disabled={disabled}>
+        <button class="btn-forget" on:click={() => dispatch('forget', { mac: device.MAC, nodeId: device.node_id })} title="Forget speaker" disabled={disabled}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
             <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
           </svg>
         </button>
-        <button class="btn-connect" on:click={() => dispatch('connect', device.MAC)} disabled={disabled}>Connect</button>
+        <button class="btn-connect" on:click={() => dispatch('connect', { mac: device.MAC, nodeId: device.node_id })} disabled={disabled}>Connect</button>
       {/if}
     </div>
   </div>

@@ -27,7 +27,8 @@ func TestRTPSinkPayload(t *testing.T) {
 				`"audio.format":"S16BE"`,
 				`"audio.channels":2`,
 				`"audio.rate":48000`,
-				`"source.name":"main-mix.monitor"`,
+				`"source.name":"rtp-sink"`,
+				`"target.object":"main-mix-source"`,
 			},
 		},
 		{

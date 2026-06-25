@@ -236,7 +236,27 @@ func (s *server) satelliteReadLoop(ctx context.Context, conn *websocket.Conn, wr
 			default:
 			}
 		case "devices":
+			// Snapshot Playing state before storing so we can emit
+			// loopback_started/stopped events to the UI for any change.
+			// Without this, the UI never sees Playing updates for satellite
+			// speakers because the full "devices" push doesn't trigger hub events.
+			var prevDevices []deviceInfo
+			if prev := s.nodes.getNode(nodeID); prev != nil {
+				prevDevices = prev.Devices
+			}
 			s.nodes.setDevices(nodeID, msg.Devices)
+			prevPlaying := make(map[string]bool, len(prevDevices))
+			for _, d := range prevDevices {
+				prevPlaying[d.MAC] = d.Playing
+			}
+			for _, d := range msg.Devices {
+				was := prevPlaying[d.MAC]
+				if d.Playing && !was {
+					go s.hub.broadcast(ctx, map[string]any{"type": "loopback_started", "mac": d.MAC, "node_id": nodeID})
+				} else if !d.Playing && was {
+					go s.hub.broadcast(ctx, map[string]any{"type": "loopback_stopped", "mac": d.MAC, "node_id": nodeID})
+				}
+			}
 		case "event":
 			gap := s.nodes.applyDeltaEvent(nodeID, msg.MAC, msg.Event, msg.Seq)
 			if gap {

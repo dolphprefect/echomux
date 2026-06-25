@@ -50,6 +50,11 @@ type Controller interface {
 	RemoveRTPSink(ctx context.Context, moduleID int) error
 	// CleanOrphanRTPModules unloads all module-rtp-send instances matching the target port.
 	CleanOrphanRTPModules(ctx context.Context, rtpPort int) error
+	// ReloadRTPSource kills any existing rtp-source pw-cli subprocess and spawns a fresh
+	// one, loading libpipewire-module-rtp-source on the given port. Called by the satellite
+	// on each reconnect to master — the PipeWire session does not auto-recover after the
+	// RTP stream restarts with a new SSRC.
+	ReloadRTPSource(ctx context.Context, port int) error
 }
 
 type Executor interface {

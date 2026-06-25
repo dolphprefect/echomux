@@ -45,6 +45,13 @@ func (s *server) runSatelliteClient(ctx context.Context) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	attempt := 0
 	for {
+		// Reload rtp-source fresh before each session — the PipeWire module session
+		// does not auto-recover when the RTP stream restarts with a new SSRC after
+		// a master restart. A fresh subprocess gives a clean session every time.
+		if err := s.audio.ReloadRTPSource(ctx, s.rtpPort); err != nil {
+			log.Printf("satellite: rtp-source reload: %v", err)
+		}
+
 		registered, err := s.satelliteSessionLoop(ctx)
 		if ctx.Err() != nil {
 			return

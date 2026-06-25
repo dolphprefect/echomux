@@ -113,6 +113,75 @@ func spawnRTPSink(destIP string, port int) (*exec.Cmd, error) {
 	}
 }
 
+// rtpSourcePayload returns the pw-cli command that loads libpipewire-module-rtp-source.
+func rtpSourcePayload(port int) string {
+	return fmt.Sprintf(
+		`load-module libpipewire-module-rtp-source `+
+			`{"source.ip":"0.0.0.0","source.port":%d,`+
+			`"sess.latency.msec":50,"node.always-process":true,`+
+			`"sess.media":"audio","audio.format":"S16BE",`+
+			`"audio.rate":48000,"audio.channels":2,`+
+			`"stream.props":{"node.name":"rtp-source","media.class":"Audio/Source"}}`,
+		port,
+	)
+}
+
+// spawnRTPSource starts a pw-cli subprocess that loads libpipewire-module-rtp-source.
+// The module stays active until the subprocess is killed.
+func spawnRTPSource(port int) (*exec.Cmd, error) {
+	cmd := exec.Command("pw-cli")
+	cmd.Env = append(os.Environ(), "PIPEWIRE_RUNTIME_DIR=/run/pipewire")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("rtp-source: stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("rtp-source: stdout pipe: %w", err)
+	}
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("rtp-source: start: %w", err)
+	}
+
+	fmt.Fprintln(stdin, rtpSourcePayload(port))
+
+	loaded := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		found := false
+		for scanner.Scan() {
+			if !found {
+				if m := moduleRefRegex.FindStringSubmatch(scanner.Text()); m != nil {
+					found = true
+					loaded <- m[1]
+				}
+			}
+		}
+		if !found {
+			loaded <- ""
+		}
+	}()
+
+	select {
+	case ref := <-loaded:
+		if ref == "" {
+			cmd.Process.Kill()
+			cmd.Wait()
+			return nil, fmt.Errorf("rtp-source: process exited before module loaded on :%d", port)
+		}
+		log.Printf("rtp-source: loaded %s ← :%d", ref, port)
+		return cmd, nil
+	case <-time.After(pwCliRTPLoadTimeout):
+		cmd.Process.Kill()
+		cmd.Wait()
+		return nil, fmt.Errorf("rtp-source: timeout waiting for module load (:%d)", port)
+	}
+}
+
 // controller methods implement the Controller interface.
 
 func (c *controller) AddRTPSink(ctx context.Context, destIP string, port int) (int, error) {
@@ -155,4 +224,20 @@ func (c *controller) RemoveRTPSink(ctx context.Context, moduleID int) error {
 func (c *controller) CleanOrphanRTPModules(ctx context.Context, rtpPort int) error {
 	killOrphanRTPSinkProcesses()
 	return c.RemoveRTPSink(ctx, rtpPort)
+}
+
+func (c *controller) ReloadRTPSource(_ context.Context, port int) error {
+	c.rtpSourceMu.Lock()
+	defer c.rtpSourceMu.Unlock()
+	if c.rtpSourceCmd != nil && c.rtpSourceCmd.Process != nil {
+		c.rtpSourceCmd.Process.Kill()
+		_ = c.rtpSourceCmd.Wait()
+	}
+	c.rtpSourceCmd = nil
+	cmd, err := spawnRTPSource(port)
+	if err != nil {
+		return err
+	}
+	c.rtpSourceCmd = cmd
+	return nil
 }

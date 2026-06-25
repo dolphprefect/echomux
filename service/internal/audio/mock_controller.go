@@ -307,6 +307,8 @@ func (c *MockController) SetCleanOrphanErr(err error) {
 	c.mu.Unlock()
 }
 
+func (c *MockController) ReloadRTPSource(_ context.Context, _ int) error { return nil }
+
 func (c *MockController) CleanOrphanRTPModules(_ context.Context, _ int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

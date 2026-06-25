@@ -11,9 +11,11 @@ import (
 )
 
 type controller struct {
-	exec     Executor
-	rtpMu    sync.Mutex
-	rtpSinks map[int]*exec.Cmd // port → running pw-cli subprocess
+	exec         Executor
+	rtpMu        sync.Mutex
+	rtpSinks     map[int]*exec.Cmd // port → running pw-cli subprocess
+	rtpSourceMu  sync.Mutex
+	rtpSourceCmd *exec.Cmd // single rtp-source pw-cli subprocess (satellite mode)
 }
 
 func NewController(exec Executor) Controller {

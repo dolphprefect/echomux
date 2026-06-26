@@ -1,157 +1,155 @@
-# echomux Native App — Agent Spec
+# echomux Web UI — Spec
 
-This document is written for an AI coding agent tasked with building a native mobile app (Android or iOS) for echomux. It covers what echomux is, how to discover it on the network, the UI the app should implement, and how to handle state and errors.
-
-The full API contract is in **[ECHOMUX-API.md](ECHOMUX-API.md)**.
+This document describes the web UI that ships embedded in the echomux binary. It is a Svelte single-page application compiled into the static assets served at `/`. The full API contract is in **[ECHOMUX-API.md](ECHOMUX-API.md)**.
 
 ---
 
-## What echomux is
+## Components
 
-echomux is a Raspberry Pi (or any Linux box) that plays Spotify simultaneously on any number of Bluetooth A2DP speakers. The user opens Spotify on their phone, selects "echomux" as the Connect source, and audio flows to all paired speakers at once. The native app manages the speakers: connect, disconnect, volume, mute, and per-speaker delay for room alignment.
-
-echomux supports a **multi-node / satellite** architecture. A **master** Pi coordinates all nodes; additional **satellite** Pis are deployed in other rooms and connect back to the master over Wi-Fi. Each satellite can manage its own set of speakers. The master's HTTP API aggregates all nodes, so the app only ever talks to the master.
-
-The backend exposes a plain HTTP + WebSocket API on the local network. There is no cloud, no auth, no pairing between the app and the server — the app talks directly to the master Pi's IP.
+```
+App (root)
+├── NodeSection          — one per node in multi-node mode
+│   └── DeviceCard       — one per speaker
+├── DeviceCard           — used directly in single-node mode
+├── ScanSheet            — slide-up overlay for adding a speaker
+└── DelaySheet           — slide-up overlay for adjusting per-speaker delay
+```
 
 ---
 
-## Discovery
+## API routing — the nodeApiId invariant
 
-echomux advertises itself over mDNS (Bonjour/Avahi) as:
+All API calls go through `api(method, path, body, nodeId)` in `lib/api.js`:
 
-```
-Service type: _echomux._tcp
-Default port: 56644
-TXT records:
-  api=v1
-  rtp_port=9001
-  rtp_codec=L16/48000/2
+```js
+const url = nodeId ? `/nodes/${nodeId}${path}` : path
 ```
 
-Use mDNS to discover the service automatically. On Android use `NsdManager`; on iOS use `NetServiceBrowser`. The user should not need to enter an IP address manually, though a manual fallback field is a nice-to-have.
+When `nodeId` is truthy the request is proxied through the master to a satellite. When `nodeId` is `undefined` or `null` the request hits the master directly.
 
-The host can also be reached at `echomux.local` if mDNS resolution works on the device.
+`GET /devices` returns a `node_id` field on every device, including master devices. Master devices carry the master's own node ID (e.g. `"living-room"`). Passing that ID to `api()` would route the request to `/nodes/living-room/...`, which the proxy cannot handle because it only knows satellite nodes — this returns 404.
+
+`App.svelte` resolves this with `nodeApiId()`:
+
+```js
+$: masterNodeId = masterNode ? masterNode.id : ''
+
+function nodeApiId(nodeId) {
+  return nodeId === masterNodeId ? undefined : nodeId
+}
+```
+
+Every call that originates in `App.svelte` (connect, disconnect, forget, delay, volume restart, scan, playback resume) passes its `nodeId` argument through `nodeApiId()` before handing it to `api()`. Components that accept a `nodeId` prop (ScanSheet, DelaySheet) receive the already-converted value — they must not use `device.node_id` directly.
 
 ---
 
-## Base URL
+## App initialisation and state
 
-```
-http://<discovered-host>:56644
-```
+On mount, `App` fetches `GET /devices` and `GET /nodes` in parallel, then opens a WebSocket to `/events`. Every full reload normalises the API's lowercase `muted`/`playing` fields to the capitalised `Muted`/`Playing` that components read.
 
-No TLS, no auth. See [ECHOMUX-API.md](ECHOMUX-API.md) for the full endpoint reference.
+Devices that are mid-connect (in the `connecting` Set) are kept visually connected across a reload by forcing `Connected: true` during normalisation.
 
----
-
-## UI the app should implement
-
-### Speaker list (main screen)
-
-The main screen adapts based on how many nodes are active:
-
-**Single-node (no satellites):**
-
-- Shows all known speakers from `GET /devices` in a flat list
-- Global **+** and **↺** buttons in the header
-
-**Multi-node (master + satellites):**
-
-- `GET /nodes` returns multiple entries; group speakers by node
-- Render a section heading bar per node showing: MASTER/SATELLITE badge, node name, online/offline status
-- Each section has its own **+** (scan) and **↺** (restart audio) buttons
-- Offline satellite sections are dimmed; their controls are disabled
-- The global header **↺** button restarts audio on all nodes
-
-Each speaker card shows: name, connection status indicator, volume slider, mute toggle.
-
-Status indicator has three states: **playing** (audio flowing), **connected** (BT up, loopback not yet running), **disconnected**.
-
-Tapping a disconnected speaker connects it; tapping a connected speaker disconnects it.
-
-Volume slider sends updates as the user drags (debounce ~200 ms); fire-and-forget, no revert on failure.
-
-### Add speaker flow
-
-1. User taps **+** on a node section (or the global **+** in single-node mode)
-2. App calls `POST /scan` (or `POST /nodes/{id}/scan` for a satellite) with `timeout_sec: 10`
-3. Show a scanning indicator; display discovered devices when the scan completes
-4. Filter out MACs already in the known speaker list (`GET /devices`)
-5. User taps a device → app calls `POST /devices/:mac/pair` then `POST /devices/:mac/connect` (routed to the correct node)
-6. On success: close the scan sheet, call `POST /playback/resume` (on the scanned node), reconnect any speakers that were disconnected for the scan
-7. On error: the scan response includes an `error` field — show it inline and allow retry
-
-**Scan response shape:**
-
-```json
-{ "devices": [...], "error": "optional failure message" }
-```
-
-Check for `error` to distinguish scan failure from a valid empty result (no devices found). Both yield `"devices": []`.
-
-### Delay adjustment
-
-- Per-speaker delay slider (0–2000 ms) on a detail screen or slide-out panel
-- Show the current value in ms with ±10 and ±50 ms nudge buttons for fine adjustment
-- Warn the user that changing the delay causes a brief audio gap on that speaker only
-- Call `PUT /devices/:mac/delay` on commit (not on every drag tick)
-- Route via `/nodes/{id}/devices/:mac/delay` for satellite speakers
-
-### Forget speaker
-
-- Accessible from the speaker card or a detail screen
-- Confirm before proceeding: "Forget [Name]? This will unpair the speaker from this device."
-- Call `DELETE /devices/:mac` (or the proxied equivalent for satellites)
-- Remove the speaker from the local list immediately (optimistic)
+WebSocket reconnects with a 3-second fixed delay. On reconnect the full load fires again via `ws.onopen`.
 
 ---
 
-## State management
+## Layout modes
 
-| Event | Action |
+**Single-node** (`nodes.length <= 1`): all devices rendered as a flat sorted list of `DeviceCard`s directly in `App`. The header shows a global restart button and a global add-speaker (+) button.
+
+**Multi-node** (`nodes.length > 1`): devices grouped by node and rendered through `NodeSection`. The global + button is hidden; each `NodeSection` has its own scan and restart buttons. The master node section receives devices whose `node_id` matches the master id, plus any devices with no `node_id`.
+
+Device sort order: connected speakers first, then alphabetical by name.
+
+---
+
+## WebSocket event handling
+
+| Event type | Effect |
 |---|---|
-| App launch | Connect WebSocket → fetch `GET /nodes` + `GET /devices` → render speaker list |
-| `connected` WS event | Mark that speaker as Connected in local model |
-| `disconnected` WS event | Mark as disconnected; clear Playing |
-| `loopback_started` WS event | Mark as Playing |
-| `loopback_stopped` WS event | Clear Playing |
-| `satellite_online` WS event | Refresh `GET /nodes` and `GET /devices`; show new satellite section |
-| `satellite_offline` WS event | Refresh `GET /nodes`; dim that node's section |
-| WebSocket close | Fall back to polling `GET /devices` every 5 s; reconnect WS with exponential backoff |
-| Connect tap | Show loading spinner until `loopback_started` arrives or 15 s timeout |
-| Volume/mute change | Optimistic UI update; fire API call; volume reverts on failure only for mute (volume is fire-and-forget) |
-| Poll response | Normalise `muted`/`playing` fields — the API returns lowercase; keep local state consistent |
+| `connected` | Set `device.Connected = true` |
+| `disconnected` | Set `device.Connected = false`, `device.Playing = false` |
+| `loopback_started` | Set `device.Playing = true` |
+| `loopback_stopped` | Set `device.Playing = false` |
+| `satellite_online` | Full reload (`GET /devices` + `GET /nodes`) |
+| `satellite_offline` | Full reload |
 
-### Routing API calls to the correct node
-
-`GET /devices` returns a `node_id` field on satellite speakers. Keep a `nodes` list from `GET /nodes` and identify the master node (role: "master"). For any API call on a satellite speaker:
-
-- If `device.node_id` is set and does not match the master's `id` → prefix the path with `/nodes/{device.node_id}/`
-- If `device.node_id` is absent or matches the master → call the path directly
-
-For scan and playback operations, use the node ID of the section the user is interacting with.
+All other event types are silently ignored. Events for unknown MACs are ignored.
 
 ---
 
-## Error handling
+## DeviceCard
 
-- If the host is unreachable: show a "can't reach echomux" screen with a **Try again** button and a manual IP/hostname entry field
-- API errors return plain text with HTTP status codes; surface these as inline error messages on the relevant control
-- Scan errors are returned as `200 OK` with an `error` field in the JSON body — do not treat the 200 as success without checking the body
-- `POST /devices/:mac/pair` returning 404 means the device disappeared after the scan — prompt the user to put it back in pairing mode and retry
-- `POST /devices/:mac/connect` returning 404 means the device is not in BlueZ — prompt to scan again
-- `502 Bad Gateway` from a proxy call means the satellite is offline — show this in the node section header
-- Never block the UI for more than 15 s waiting for async confirmation; show a timeout message and let the user retry
+Displays one speaker. State derives from the `device` prop:
+
+- Dot indicator: `dot` (disconnected), `dot on` (connected), `dot on playing` (loopback running)
+- Card class: default (connected), `connecting` (in-flight), `offline` (disconnected)
+
+**Connected state controls:**
+- Delay chip — shows `device.delay_ms` (or 0); tapping dispatches `openDelay` with the device object. The chip is disabled during a scan (`disabled` prop).
+- Disconnect button (power icon) — dispatches `disconnect` with `{ mac, nodeId: device.node_id }`.
+- Volume slider (0–100) — local state tracks the drag position. On `input`, updates `localVol` without calling the API. On `change` (release), commits the value via `PUT /devices/{mac}/volume` and dispatches `volumeChange`. Volume calls use `device.node_id` directly (not converted through `nodeApiId`) — these are fire-and-forget with no revert on failure.
+- Mute button — optimistic toggle: dispatches `muteChange`, calls `PUT /devices/{mac}/mute`, reverts and dispatches again on failure. Also uses `device.node_id` directly.
+
+**Disconnected state controls:**
+- Forget button (trash icon) — dispatches `forget` with `{ mac, nodeId: device.node_id }`.
+- Connect button — dispatches `connect` with `{ mac, nodeId: device.node_id }`.
+
+Volume slider is disabled when volume is `< 0` (PipeWire node not yet created) or when the `disabled` prop is set.
 
 ---
 
-## What the app does NOT need to do
+## NodeSection
 
-- No auth or login
-- No cloud sync
-- No push notifications
-- No playback control (play / pause / skip) — that is handled in the Spotify app
-- No audio streaming from the phone — echomux receives audio via Spotify Connect on the Pi
-- No settings persistence on the app side — all state (volumes, delays, known speakers) lives on the server
-- No direct communication with satellite nodes — always go through the master
+Wraps a node header and a grid of `DeviceCard`s. When the node is offline, the section is dimmed and cards are replaced with "Node is offline." When a scan is active for this node (`scanningNodeId === node.id`), the card grid receives `pointer-events: none` and 65% opacity, and the add button shows a spinner.
+
+Satellite sections do not show controls for offline nodes — the restart and add buttons are hidden when `isOffline`.
+
+---
+
+## ScanSheet
+
+Opens when the user taps a node's add button. On mount:
+1. Calls `GET /devices` (via `nodeId`) to record which speakers were connected before the scan.
+2. Calls `POST /scan` with `{ timeout_sec: 10 }` (via `nodeId`).
+3. Filters results against `knownMACs` to hide already-paired devices.
+
+The `nodeId` prop is the already-converted value from `nodeApiId()` — for master scans it is `undefined`, for satellite scans it is the satellite's ID.
+
+Tapping "Add" on a result calls `POST /devices/{mac}/pair` then `POST /devices/{mac}/connect` (both via `nodeId`). State tracks each device independently: `loading` → `done` or `error`. The sheet auto-closes 800ms after the last in-flight add completes, provided no adds errored.
+
+"Scan again" re-runs the scan without closing the sheet.
+
+On close the sheet dispatches `{ prevConnected }`. `App` then calls `POST /playback/resume` (via `nodeApiId`) and reconnects each previously-connected speaker.
+
+---
+
+## DelaySheet
+
+Opens over a specific device. Accepts two props: `device` and `nodeId`.
+
+`nodeId` must be the value from `nodeApiId(device.node_id)`, not `device.node_id` directly. For master devices, `device.node_id` equals the master's node ID — passing it raw to `api()` routes the request through the proxy which returns 404. `App.svelte` always passes `nodeId={nodeApiId(delayDevice.node_id)}`.
+
+The slider (0–2000 ms) updates the local `ms` display on `input` without calling the API. On `change` (slider release) or nudge button click, the value is clamped and committed via `PUT /devices/{mac}/delay`. On API failure the value reverts to the pre-commit value. On success the `updated` event is dispatched so `App` can sync `device.delay_ms`.
+
+Nudge buttons: −50, −10, +10, +50 ms. All go through the same `commit()` path.
+
+---
+
+## Restart audio
+
+**Global restart** (header button): calls `POST /playback/restart` with no node prefix, waits 2500ms, then reloads. Disabled while any restart or reconnect is in progress.
+
+**Per-node restart** (`NodeSection` restart button): calls `POST /playback/restart` via `nodeApiId(nodeId)`, waits 2500ms, then reloads. A separate `restartingNodeId` tracks which node is restarting. The global restart button is disabled while any per-node restart is running.
+
+---
+
+## Error states
+
+- **Load error**: replaces the device list with "Can't reach echomux" and a "Try again" button that re-runs `load()`.
+- **Connect error**: shown inline on the card for 5 seconds. Errors containing `org.bluez` are displayed as "Connection failed".
+- **Scan error**: shown inline in the ScanSheet; "Scan again" is always available.
+- **Delay commit failure**: silently reverts the slider and readout to the previous value.
+- **Volume failure**: silently ignored (fire-and-forget).
+- **Mute failure**: reverts via a second `muteChange` dispatch.
+- **Disconnect failure**: reverts `Connected` back to true in local state.

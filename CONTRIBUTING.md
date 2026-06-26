@@ -71,6 +71,38 @@ Before submitting a PR, an AI agent or human contributor must go through every s
 
 ---
 
+## Build and deploy
+
+The repo contains a `Makefile` with core targets and a `Makefile.local` (gitignored) for machine-specific overrides such as the satellite SSH host. The targets below assume `Makefile.local` is present and configured.
+
+```bash
+make deps            # npm install for the UI (run once, or after package.json changes)
+make build           # build UI then compile Go binary → service/echomux
+make deploy-master   # build + stop service + copy binary + start service (on the master Pi)
+make deploy-satellite # build + scp binary to satellite + restart service there
+make deploy-all      # build + deploy-master + deploy-satellite, prints service status for both
+```
+
+`Makefile.local` must define `SATELLITE_HOST`, `SATELLITE_KEY`, and the SSH/SCP aliases. See the existing `Makefile.local` for the expected variable names.
+
+---
+
+## Project structure
+
+```
+service/
+  cmd/echomux/        main.go — flag parsing, server wiring
+  internal/
+    api/              HTTP handlers, WebSocket events, satellite proxy, node registry
+    audio/            PipeWire / pactl controller and loopback management
+    bluetooth/        BlueZ DBus manager
+  ui/src/             Svelte UI (components, lib, tests)
+  echomux.service     systemd unit template
+  setup/              install.sh interactive setup script
+```
+
+---
+
 ## Running the test suites
 
 ```bash

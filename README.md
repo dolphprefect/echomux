@@ -116,15 +116,6 @@ When prompted, select **satellite** mode and enter the master's `host:port`. The
 
 The satellite connects to the master via WebSocket, registers, and appears immediately in the UI under its own section.
 
-### Satellite configuration variables
-
-| Variable | Description |
-|---|---|
-| `ECHOMUX_MODE` | `standalone` (default), `master`, or `satellite` |
-| `ECHOMUX_NAME` | Display name for this node (used as node ID slug) |
-| `ECHOMUX_MASTER_ADDR` | `host:port` of the master — satellite only |
-| `ECHOMUX_SELF_ADDR` | Public `host:port` this satellite reports to the master for HTTP proxy; auto-detected if omitted |
-
 ---
 
 ## Configuration
@@ -139,11 +130,16 @@ sudo systemctl restart echomux
 |---|---|---|
 | `ECHOMUX_ADAPTER` | `hci0` | Bluetooth adapter (`hciconfig -a` to list) |
 | `ECHOMUX_ADDR` | `:56644` | HTTP listen address |
-| `ECHOMUX_SPOTIFY_NAME` | `echomux` | Name shown in the Spotify source picker |
-| `ECHOMUX_STATE_FILE` | `~/.local/share/echomux/state.json` | Where speaker settings are persisted |
 | `ECHOMUX_MODE` | `standalone` | Operating mode: `standalone`, `master`, or `satellite` |
-| `ECHOMUX_MASTER_ADDR` | _(unset)_ | Master address for satellite mode |
-| `ECHOMUX_DEBUG` | _(unset)_ | Set to `true` for verbose logging |
+| `ECHOMUX_NAME` | hostname | Node display name shown in the UI |
+| `ECHOMUX_STATE_FILE` | `~/.local/share/echomux/state.json` | Where speaker settings are persisted |
+| `ECHOMUX_MASTER_ADDR` | _(unset)_ | Master `host:port` — satellite mode only |
+| `ECHOMUX_SELF_ADDR` | _(auto)_ | Public `host:port` this node reports to the master for HTTP proxying — satellite mode only; auto-detected if unset |
+| `ECHOMUX_TLS_CERT` | _(unset)_ | TLS certificate path (enables HTTPS when set together with `ECHOMUX_TLS_KEY`) |
+| `ECHOMUX_TLS_KEY` | _(unset)_ | TLS private key path |
+| `ECHOMUX_DEBUG` | _(unset)_ | Set to `true` for verbose request/BT/audio logging |
+
+The RTP port used for audio unicast to satellites is set with the CLI flag `--rtp-port` (default `9001`); it has no corresponding env var. It must match the port in the satellite's PipeWire RTP source config.
 
 All settings can also be passed as CLI flags (flags take precedence over env vars). Run `echomux --help` for the full list.
 

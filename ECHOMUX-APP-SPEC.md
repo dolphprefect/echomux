@@ -1,4 +1,4 @@
-# echomux Web UI — Spec
+# echomux Web UI: Spec
 
 This document describes the web UI that ships embedded in the echomux binary. It is a Svelte single-page application compiled into the static assets served at `/`. The full API contract is in **[ECHOMUX-API.md](ECHOMUX-API.md)**.
 
@@ -17,7 +17,7 @@ App (root)
 
 ---
 
-## API routing — the nodeApiId invariant
+## API routing: the nodeApiId invariant
 
 All API calls go through `api(method, path, body, nodeId)` in `lib/api.js`:
 
@@ -27,7 +27,7 @@ const url = nodeId ? `/nodes/${nodeId}${path}` : path
 
 When `nodeId` is truthy the request is proxied through the master to a satellite. When `nodeId` is `undefined` or `null` the request hits the master directly.
 
-`GET /devices` returns a `node_id` field on every device, including master devices. Master devices carry the master's own node ID (e.g. `"living-room"`). Passing that ID to `api()` would route the request to `/nodes/living-room/...`, which the proxy cannot handle because it only knows satellite nodes — this returns 404.
+`GET /devices` returns a `node_id` field on every device, including master devices. Master devices carry the master's own node ID (e.g. `"living-room"`). Passing that ID to `api()` would route the request to `/nodes/living-room/...`, which the proxy cannot handle because it only knows satellite nodes, this returns 404.
 
 `App.svelte` resolves this with `nodeApiId()`:
 
@@ -39,7 +39,7 @@ function nodeApiId(nodeId) {
 }
 ```
 
-Every call that originates in `App.svelte` (connect, disconnect, forget, delay, volume restart, scan, playback resume) passes its `nodeId` argument through `nodeApiId()` before handing it to `api()`. Components that accept a `nodeId` prop (ScanSheet, DelaySheet) receive the already-converted value — they must not use `device.node_id` directly.
+Every call that originates in `App.svelte` (connect, disconnect, forget, delay, volume restart, scan, playback resume) passes its `nodeId` argument through `nodeApiId()` before handing it to `api()`. Components that accept a `nodeId` prop (ScanSheet, DelaySheet) receive the already-converted value, they must not use `device.node_id` directly.
 
 ---
 
@@ -86,14 +86,14 @@ Displays one speaker. State derives from the `device` prop:
 - Card class: default (connected), `connecting` (in-flight), `offline` (disconnected)
 
 **Connected state controls:**
-- Delay chip — shows `device.delay_ms` (or 0); tapping dispatches `openDelay` with the device object. The chip is disabled during a scan (`disabled` prop).
-- Disconnect button (power icon) — dispatches `disconnect` with `{ mac, nodeId: device.node_id }`.
-- Volume slider (0–100) — local state tracks the drag position. On `input`, updates `localVol` without calling the API. On `change` (release), commits the value via `PUT /devices/{mac}/volume` and dispatches `volumeChange`. Volume calls use `device.node_id` directly (not converted through `nodeApiId`) — these are fire-and-forget with no revert on failure.
-- Mute button — optimistic toggle: dispatches `muteChange`, calls `PUT /devices/{mac}/mute`, reverts and dispatches again on failure. Also uses `device.node_id` directly.
+- Delay chip: shows `device.delay_ms` (or 0); tapping dispatches `openDelay` with the device object. The chip is disabled during a scan (`disabled` prop).
+- Disconnect button (power icon): dispatches `disconnect` with `{ mac, nodeId: device.node_id }`.
+- Volume slider (0–100): local state tracks the drag position. On `input`, updates `localVol` without calling the API. On `change` (release), commits the value via `PUT /devices/{mac}/volume` and dispatches `volumeChange`. Volume calls use `device.node_id` directly (not converted through `nodeApiId`): these are fire-and-forget with no revert on failure.
+- Mute button: optimistic toggle: dispatches `muteChange`, calls `PUT /devices/{mac}/mute`, reverts and dispatches again on failure. Also uses `device.node_id` directly.
 
 **Disconnected state controls:**
-- Forget button (trash icon) — dispatches `forget` with `{ mac, nodeId: device.node_id }`.
-- Connect button — dispatches `connect` with `{ mac, nodeId: device.node_id }`.
+- Forget button (trash icon): dispatches `forget` with `{ mac, nodeId: device.node_id }`.
+- Connect button: dispatches `connect` with `{ mac, nodeId: device.node_id }`.
 
 Volume slider is disabled when volume is `< 0` (PipeWire node not yet created) or when the `disabled` prop is set.
 
@@ -103,7 +103,7 @@ Volume slider is disabled when volume is `< 0` (PipeWire node not yet created) o
 
 Wraps a node header and a grid of `DeviceCard`s. When the node is offline, the section is dimmed and cards are replaced with "Node is offline." When a scan is active for this node (`scanningNodeId === node.id`), the card grid receives `pointer-events: none` and 65% opacity, and the add button shows a spinner.
 
-Satellite sections do not show controls for offline nodes — the restart and add buttons are hidden when `isOffline`.
+Satellite sections do not show controls for offline nodes, the restart and add buttons are hidden when `isOffline`.
 
 ---
 
@@ -114,7 +114,7 @@ Opens when the user taps a node's add button. On mount:
 2. Calls `POST /scan` with `{ timeout_sec: 10 }` (via `nodeId`).
 3. Filters results against `knownMACs` to hide already-paired devices.
 
-The `nodeId` prop is the already-converted value from `nodeApiId()` — for master scans it is `undefined`, for satellite scans it is the satellite's ID.
+The `nodeId` prop is the already-converted value from `nodeApiId()`, for master scans it is `undefined`, for satellite scans it is the satellite's ID.
 
 Tapping "Add" on a result calls `POST /devices/{mac}/pair` then `POST /devices/{mac}/connect` (both via `nodeId`). State tracks each device independently: `loading` → `done` or `error`. The sheet auto-closes 800ms after the last in-flight add completes, provided no adds errored.
 
@@ -128,7 +128,7 @@ On close the sheet dispatches `{ prevConnected }`. `App` then calls `POST /playb
 
 Opens over a specific device. Accepts two props: `device` and `nodeId`.
 
-`nodeId` must be the value from `nodeApiId(device.node_id)`, not `device.node_id` directly. For master devices, `device.node_id` equals the master's node ID — passing it raw to `api()` routes the request through the proxy which returns 404. `App.svelte` always passes `nodeId={nodeApiId(delayDevice.node_id)}`.
+`nodeId` must be the value from `nodeApiId(device.node_id)`, not `device.node_id` directly. For master devices, `device.node_id` equals the master's node ID, passing it raw to `api()` routes the request through the proxy which returns 404. `App.svelte` always passes `nodeId={nodeApiId(delayDevice.node_id)}`.
 
 The slider (0–2000 ms) updates the local `ms` display on `input` without calling the API. On `change` (slider release) or nudge button click, the value is clamped and committed via `PUT /devices/{mac}/delay`. On API failure the value reverts to the pre-commit value. On success the `updated` event is dispatched so `App` can sync `device.delay_ms`.
 

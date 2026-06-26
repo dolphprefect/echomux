@@ -41,8 +41,8 @@ In `standalone` mode there is only one node and `/nodes` returns a single-elemen
 | `GET` | `/input` | List available PipeWire source nodes |
 | `POST` | `/input/discover` | Make the Pi discoverable as a BT input target |
 | `GET` | `/stream` | Check whether an RTP audio stream is active |
-| `GET` | `/events` | WebSocket — real-time BT and loopback events |
-| `WS` | `/nodes` | WebSocket — satellite registration (master only; used by satellite process, not UI) |
+| `GET` | `/events` | WebSocket, real-time BT and loopback events |
+| `WS` | `/nodes` | WebSocket, satellite registration (master only; used by satellite process, not UI) |
 
 ---
 
@@ -125,11 +125,11 @@ Returns known speakers across all nodes (master + online satellites). In master 
 
 | Field | Type | Description |
 |---|---|---|
-| `MAC` | string | Bluetooth MAC address — used as the identifier in all other endpoints |
+| `MAC` | string | Bluetooth MAC address, used as the identifier in all other endpoints |
 | `Name` | string | Bluetooth device name |
 | `Connected` | bool | BT connection is currently up |
 | `Paired` | bool | Device is paired with the host adapter |
-| `playing` | bool | Audio loopback is alive — audio is actively flowing |
+| `playing` | bool | Audio loopback is alive, audio is actively flowing |
 | `delay_ms` | int | Per-speaker delay in milliseconds (0–2000) |
 | `volume` | int | Volume 0–100; `-1` means the PipeWire node has not registered yet |
 | `muted` | bool | Whether the speaker is muted |
@@ -141,7 +141,7 @@ Returns an empty array `[]` when no speakers have been added yet.
 
 ## POST /scan
 
-Starts a Bluetooth discovery scan. While scanning, all active speakers on the target node are temporarily disconnected and audio is paused — classic BT inquiry and A2DP streams share the same radio.
+Starts a Bluetooth discovery scan. While scanning, all active speakers on the target node are temporarily disconnected and audio is paused, classic BT inquiry and A2DP streams share the same radio.
 
 To scan on a satellite node, use the proxy: `POST /nodes/{id}/scan`.
 
@@ -153,7 +153,7 @@ To scan on a satellite node, use the proxy: `POST /nodes/{id}/scan`.
 
 `timeout_sec` defaults to 10 if absent or ≤ 0.
 
-**Response 200** — always returns an envelope:
+**Response 200**, always returns an envelope:
 
 ```json
 { "devices": [
@@ -172,13 +172,13 @@ The HTTP status is always `200 OK`. An empty `devices` array with no `error` fie
 
 Response headers are flushed immediately when the scan starts so that the master's node proxy does not time out waiting for headers during the scan duration.
 
-After the scan sheet closes, call `POST /playback/resume` to reconnect speakers and restore audio. The server does not auto-resume — the client owns the pause/resume lifecycle. If the client disconnects mid-scan the server auto-unpauses as a safety fallback.
+After the scan sheet closes, call `POST /playback/resume` to reconnect speakers and restore audio. The server does not auto-resume, the client owns the pause/resume lifecycle. If the client disconnects mid-scan the server auto-unpauses as a safety fallback.
 
 ---
 
 ## POST /devices/{mac}/connect
 
-Connects to a Bluetooth speaker. Retries up to 3 times with a 2 s gap on transient radio errors. Returns as soon as the BT connection succeeds. The audio loopback starts asynchronously within a few seconds — watch for `loopback_started` on the WebSocket.
+Connects to a Bluetooth speaker. Retries up to 3 times with a 2 s gap on transient radio errors. Returns as soon as the BT connection succeeds. The audio loopback starts asynchronously within a few seconds, watch for `loopback_started` on the WebSocket.
 
 "AlreadyConnected" errors from BlueZ are treated as success.
 
@@ -248,7 +248,7 @@ Mutes or unmutes the speaker.
 
 ## PUT /devices/{mac}/delay
 
-Sets the per-speaker delay. If a loopback is running, it is killed and immediately respawned with the new delay — there will be a brief audio gap on this speaker only. Other speakers are not affected. The delay is persisted across restarts.
+Sets the per-speaker delay. If a loopback is running, it is killed and immediately respawned with the new delay, there will be a brief audio gap on this speaker only. Other speakers are not affected. The delay is persisted across restarts.
 
 **Request body:**
 
@@ -322,13 +322,13 @@ Both fields default to `true` and `60` respectively if absent or zero.
 
 Reports whether an active RTP audio stream is present in the PipeWire graph (detected by finding a node named `rtp-source`).
 
-**Response 200 — stream active:**
+**Response 200, stream active:**
 
 ```json
 { "active": true, "source_node_id": 99 }
 ```
 
-**Response 200 — no stream:**
+**Response 200, no stream:**
 
 ```json
 { "active": false }
@@ -340,7 +340,7 @@ Reports whether an active RTP audio stream is present in the PipeWire graph (det
 
 ---
 
-## GET /events — WebSocket
+## GET /events: WebSocket
 
 ```
 ws://<host>:56644/events
@@ -355,8 +355,8 @@ Persistent WebSocket connection for real-time state updates. Each message is a J
 | `connected` | `mac` | Bluetooth connection established |
 | `disconnected` | `mac` | Bluetooth connection dropped |
 | `paired` | `mac` | Bluetooth pairing completed |
-| `loopback_started` | `mac` | Audio loopback is live — speaker is now playing |
-| `loopback_stopped` | `mac` | Audio loopback died — speaker is connected but silent |
+| `loopback_started` | `mac` | Audio loopback is live, speaker is now playing |
+| `loopback_stopped` | `mac` | Audio loopback died, speaker is connected but silent |
 | `satellite_online` | `node_id`, `name` | A satellite node connected to the master |
 | `satellite_offline` | `node_id`, `name` | A satellite node disconnected from the master |
 
@@ -364,11 +364,11 @@ Persistent WebSocket connection for real-time state updates. Each message is a J
 
 BT events (`connected`, `disconnected`) originating from a satellite also carry a `node_id` field identifying the satellite.
 
-The server accepts any Origin (no CSRF protection — appropriate for a local network device).
+The server accepts any Origin (no CSRF protection, appropriate for a local network device).
 
 ---
 
-## WS /nodes — Satellite control plane
+## WS /nodes: Satellite control plane
 
 ```
 ws://<master-host>:56644/nodes

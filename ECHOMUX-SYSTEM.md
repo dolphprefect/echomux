@@ -1,4 +1,4 @@
-# echomux — System Architecture & Technical Reference
+# echomux: System Architecture & Technical Reference
 
 This document covers how echomux works internally, the PipeWire and BlueZ configuration it depends on, troubleshooting procedures, and how to build and deploy.
 
@@ -88,7 +88,7 @@ The connection is kept alive with a **ping/pong heartbeat** every 10 seconds (5-
 
 **Device state sync** uses two mechanisms:
 - **Delta events**: the satellite sends `{"type":"event", "mac":"...", "event":"connected|disconnected", "seq":N}` for each BT state change. The master applies these to its cached device list. Each delta carries a monotonically increasing `seq`; if the master detects a gap it sends `{"type":"request_sync"}` to request a full push
-- **Full push**: the satellite responds to `request_sync` with `{"type":"devices", "devices":[...]}` — a complete snapshot. The master also sends `request_sync` on a 5-minute timer as a backstop. On the satellite side, a full push is also triggered whenever speaker state changes (volume, mute, delay, forget)
+- **Full push**: the satellite responds to `request_sync` with `{"type":"devices", "devices":[...]}` - a complete snapshot. The master also sends `request_sync` on a 5-minute timer as a backstop. On the satellite side, a full push is also triggered whenever speaker state changes (volume, mute, delay, forget)
 
 When the connection drops, the master kills the RTP sink subprocess, marks the node offline, clears its device cache, and broadcasts `satellite_offline`.
 
@@ -110,7 +110,7 @@ main-mix (PipeWire on master)
 
 **RTP sink (master side):** managed by a persistent `pw-cli` subprocess per satellite session. The subprocess holds the PipeWire module loaded; killing it unloads the module. `pw-cli` is started with `Pdeathsig: SIGKILL` so it dies automatically if echomux crashes. At master startup, any surviving `pw-cli` processes from a previous crash are killed with `pkill -KILL -x pw-cli` before new sinks are created.
 
-**RTP source (satellite side):** loaded dynamically by the satellite before each connection attempt to the master, also via a persistent `pw-cli` subprocess. The subprocess is killed and respawned fresh on every reconnect — the PipeWire module session does not auto-recover when the RTP stream restarts with a new SSRC after a master restart. The `10-rtp-source.conf` file installed to `/etc/pipewire/pipewire.conf.d/` on the satellite is intentionally empty; the module is loaded entirely by echomux at runtime.
+**RTP source (satellite side):** loaded dynamically by the satellite before each connection attempt to the master, also via a persistent `pw-cli` subprocess. The subprocess is killed and respawned fresh on every reconnect, the PipeWire module session does not auto-recover when the RTP stream restarts with a new SSRC after a master restart. The `10-rtp-source.conf` file installed to `/etc/pipewire/pipewire.conf.d/` on the satellite is intentionally empty; the module is loaded entirely by echomux at runtime.
 
 The `rtp-source → main-mix` link is managed by **tickRouter** on the satellite, which creates the link if it is missing on every 2-second tick.
 
@@ -133,7 +133,7 @@ The `echomux` binary (`service/cmd/echomux/main.go`) runs several concurrent loo
 ### tickRouter (every 2 s)
 
 1. Calls `pw-dump` to snapshot the PipeWire graph
-2. Ensures the `rtp-source → main-mix` link exists (creates it if missing) — applies on satellite only; no-op on standalone/master where there is no rtp-source
+2. Ensures the `rtp-source → main-mix` link exists (creates it if missing): applies on satellite only; no-op on standalone/master where there is no rtp-source
 3. For every `bluez_output.*` BT sink node:
    - Registers the MAC as a known speaker if not already known
    - Spawns a pw-loopback if none is running
@@ -231,9 +231,9 @@ echomux requires **BlueZ 5.83 or later**. BlueZ ≤ 5.82 cannot maintain simulta
 
 `github.com/muka/go-bluetooth` is vendored at `service/vendor/`. Two patches are applied:
 
-**1. `util/map_struct.go`** — `MapToStruct` skips fields it cannot decode instead of returning an error. Required for devices that expose `AdvertisingData` with `uint8` keys (common on generic BT speakers), which would otherwise cause `GetDevices()` to fail for those devices.
+**1. `util/map_struct.go`**, `MapToStruct` skips fields it cannot decode instead of returning an error. Required for devices that expose `AdvertisingData` with `uint8` keys (common on generic BT speakers), which would otherwise cause `GetDevices()` to fail for those devices.
 
-**2. `bluez/profile/adapter/adapter_devices.go`** — `parseDevice` ignores `MapToStruct` errors (belt-and-suspenders with patch 1).
+**2. `bluez/profile/adapter/adapter_devices.go`**, `parseDevice` ignores `MapToStruct` errors (belt-and-suspenders with patch 1).
 
 ---
 

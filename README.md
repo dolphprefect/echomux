@@ -14,14 +14,14 @@ Open the web UI on your phone, connect your speakers, and pick **echomux** as th
 
 ## Features
 
-- **Multi-room Bluetooth A2DP** — streams to any number of speakers simultaneously, any brand
-- **Spotify Connect** — appears as a device in the Spotify app; no extra app needed
+- **Multi-room Bluetooth A2DP** - streams to any number of speakers simultaneously, any brand
+- **Spotify Connect** - appears as a device in the Spotify app; no extra app needed
 - **Per-speaker volume and mute**
-- **Per-speaker delay** — compensate for room distance (0–2000 ms) to keep speakers in sync
-- **Multi-node / satellite** — add more Raspberry Pis to reach speakers in distant rooms; all nodes are controlled from a single UI on the master
-- **Mobile-first web UI** — phone-optimised, works in any browser; groups speakers by node when multiple nodes are active
-- **Auto-reconnect** — known speakers reconnect automatically after a reboot
-- **Headless** — no monitor, keyboard, or desktop environment required
+- **Per-speaker delay** - compensate for room distance (0–2000 ms) to keep speakers in sync
+- **Multi-node / satellite** - add more Raspberry Pis to reach speakers in distant rooms; all nodes are controlled from a single UI on the master
+- **Mobile-first web UI** - phone-optimised, works in any browser; groups speakers by node when multiple nodes are active
+- **Auto-reconnect** - known speakers reconnect automatically after a reboot
+- **Headless** - no monitor, keyboard, or desktop environment required
 
 ---
 
@@ -29,9 +29,9 @@ Open the web UI on your phone, connect your speakers, and pick **echomux** as th
 
 **Tested on:**
 
-- Raspberry Pi 5 (8 GB) — master
-- Raspberry Pi 4 (4 GB) — satellite
-- TP-Link UB500 USB Bluetooth 5.0 dongle (optional — better range than the built-in adapter)
+- Raspberry Pi 5 (8 GB): master
+- Raspberry Pi 4 (4 GB): satellite
+- TP-Link UB500 USB Bluetooth 5.0 dongle (optional: better range than the built-in adapter)
 
 **Should work on any:**
 
@@ -56,7 +56,7 @@ Open the web UI on your phone, connect your speakers, and pick **echomux** as th
 curl -fsSL https://raw.githubusercontent.com/dolphprefect/echomux/main/service/setup/install.sh | bash
 ```
 
-The script is **interactive** — it will ask:
+The script is **interactive**, it will ask:
 
 - **Mode**: `standalone` (single Pi), `master` (multi-room master), or `satellite`
 - **Display name**: shown in the UI (defaults to hostname)
@@ -79,7 +79,7 @@ After reboot, open `http://<your-pi-ip>:56644` in a browser.
 3. Open the Spotify app and select **echomux** as the playback device
 4. Music plays on all connected speakers simultaneously
 
-Each speaker card has an independent volume slider and a delay control. Use the delay to keep speakers in different rooms in sync — add delay to the closer speaker to match the travel time to the more distant one.
+Each speaker card has an independent volume slider and a delay control. Use the delay to keep speakers in different rooms in sync, add delay to the closer speaker to match the travel time to the more distant one.
 
 The **restart button** (↺) in the header kills and respawns all audio loopbacks on all nodes. Each node section also has its own restart button for per-node recovery.
 
@@ -107,7 +107,7 @@ A single Raspberry Pi can only reach speakers within Bluetooth range. To cover m
                    └─────────────────────┘  └───────────────────────┘
 ```
 
-The satellite is a full echomux instance running in `satellite` mode. It has no web UI of its own — the master proxies all API calls to it via `/nodes/{id}/...`.
+The satellite is a full echomux instance running in `satellite` mode. It has no web UI of its own, the master proxies all API calls to it via `/nodes/{id}/...`.
 
 ### Setting up a satellite
 
@@ -138,8 +138,8 @@ sudo systemctl restart echomux
 | `ECHOMUX_MODE` | `standalone` | Operating mode: `standalone`, `master`, or `satellite` |
 | `ECHOMUX_NAME` | hostname | Node display name shown in the UI |
 | `ECHOMUX_STATE_FILE` | `~/.local/share/echomux/state.json` | Where speaker settings are persisted |
-| `ECHOMUX_MASTER_ADDR` | _(unset)_ | Master `host:port` — satellite mode only |
-| `ECHOMUX_SELF_ADDR` | _(auto)_ | Public `host:port` this node reports to the master for HTTP proxying — satellite mode only; auto-detected if unset |
+| `ECHOMUX_MASTER_ADDR` | _(unset)_ | Master `host:port`, satellite mode only |
+| `ECHOMUX_SELF_ADDR` | _(auto)_ | Public `host:port` this node reports to the master for HTTP proxying, satellite mode only; auto-detected if unset |
 | `ECHOMUX_TLS_CERT` | _(unset)_ | TLS certificate path (enables HTTPS when set together with `ECHOMUX_TLS_KEY`) |
 | `ECHOMUX_TLS_KEY` | _(unset)_ | TLS private key path |
 | `ECHOMUX_DEBUG` | _(unset)_ | Set to `true` for verbose request/BT/audio logging |
@@ -184,9 +184,9 @@ Set `ECHOMUX_ADAPTER=hci1` in `/etc/echomux/echomux.conf` and restart the servic
 
 ## Further reading
 
-- **[ECHOMUX-SYSTEM.md](ECHOMUX-SYSTEM.md)** — architecture, PipeWire/BlueZ internals, troubleshooting, build instructions
-- **[ECHOMUX-API.md](ECHOMUX-API.md)** — full HTTP and WebSocket API reference
-- **[ECHOMUX-APP-SPEC.md](ECHOMUX-APP-SPEC.md)** — spec for building a native mobile app
+- **[ECHOMUX-SYSTEM.md](ECHOMUX-SYSTEM.md)** - architecture, PipeWire/BlueZ internals, troubleshooting, build instructions
+- **[ECHOMUX-API.md](ECHOMUX-API.md)** - full HTTP and WebSocket API reference
+- **[ECHOMUX-APP-SPEC.md](ECHOMUX-APP-SPEC.md)** - spec for building a native mobile app
 
 ---
 

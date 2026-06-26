@@ -1,5 +1,11 @@
 # echomux
 
+[![CI](https://github.com/dolphprefect/echomux/actions/workflows/ci.yml/badge.svg)](https://github.com/dolphprefect/echomux/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/tag/dolphprefect/echomux?label=release&color=0ea5e9)](https://github.com/dolphprefect/echomux/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-2563eb)](LICENSE)
+
+[Features](#features) | [Hardware](#hardware) | [Installation](#installation) | [Usage](#how-to-use) | [Multi-node](#multi-node-setup-satellite) | [Configuration](#configuration) | [License](#license)
+
 Play Spotify on any number of Bluetooth speakers simultaneously, with per-speaker volume and latency adjustment for room alignment.
 
 Open the web UI on your phone, connect your speakers, and pick **echomux** as the Spotify Connect source. Audio streams to all connected speakers at once.
@@ -25,12 +31,11 @@ Open the web UI on your phone, connect your speakers, and pick **echomux** as th
 
 - Raspberry Pi 5 (8 GB) — master
 - Raspberry Pi 4 (4 GB) — satellite
-- Raspberry Pi OS Bookworm (64-bit, headless)
 - TP-Link UB500 USB Bluetooth 5.0 dongle (optional — better range than the built-in adapter)
 
 **Should work on any:**
 
-- Linux machine running Debian Bookworm / Ubuntu 22.04+
+- Linux system with systemd and PipeWire
 - Bluetooth adapter that supports A2DP source role (most do)
 
 **Speakers:** any Bluetooth A2DP speaker

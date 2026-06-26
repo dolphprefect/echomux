@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js'
 
   export let device
+  export let nodeId = undefined
 
   const dispatch = createEventDispatcher()
 
@@ -16,7 +17,7 @@
     const prev = ms
     ms = clamped
     try {
-      await api('PUT', `/devices/${device.MAC}/delay`, { ms: clamped }, device.node_id)
+      await api('PUT', `/devices/${device.MAC}/delay`, { ms: clamped }, nodeId)
       dispatch('updated', { mac: device.MAC, ms: clamped })
     } catch(e) {
       ms = prev

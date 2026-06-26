@@ -293,6 +293,7 @@
 {#if delayDevice}
   <DelaySheet
     device={delayDevice}
+    nodeId={nodeApiId(delayDevice.node_id)}
     on:close={() => delayDevice = null}
     on:updated={e => {
       const dev = devices.find(d => d.MAC === e.detail.mac)

@@ -12,8 +12,8 @@ function okFetch() {
   })
 }
 
-function device(delay_ms = 100) {
-  return { MAC: 'AA:BB:CC:DD:EE:FF', Name: 'Speaker', delay_ms }
+function device(delay_ms = 100, node_id = undefined) {
+  return { MAC: 'AA:BB:CC:DD:EE:FF', Name: 'Speaker', delay_ms, node_id }
 }
 
 describe('DelaySheet', () => {
@@ -119,5 +119,32 @@ describe('DelaySheet', () => {
 
     await fireEvent.click(getByText('+50'))
     await waitFor(() => expect(getByText('2000')).toBeTruthy())
+  })
+
+  // Regression: master devices have a node_id but must call /devices/{mac}/delay
+  // directly (not /nodes/{masterNodeId}/devices/{mac}/delay) because the proxy
+  // only knows satellite nodes and returns 404 for the master's own id.
+  // App.svelte converts the master node_id to undefined via nodeApiId() before
+  // passing it as the nodeId prop — DelaySheet must use nodeId, not device.node_id.
+  it('calls /devices/{mac}/delay directly when nodeId is undefined (master device)', async () => {
+    global.fetch = okFetch()
+    const dev = device(100, 'living-room') // device has a node_id but master converts to undefined
+    const { getByText } = render(DelaySheet, { props: { device: dev, nodeId: undefined } })
+
+    await fireEvent.click(getByText('+50'))
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/devices/AA:BB:CC:DD:EE:FF/delay')
+  })
+
+  it('calls /nodes/{id}/devices/{mac}/delay when nodeId is set (satellite device)', async () => {
+    global.fetch = okFetch()
+    const dev = device(100, 'fitness-room')
+    const { getByText } = render(DelaySheet, { props: { device: dev, nodeId: 'fitness-room' } })
+
+    await fireEvent.click(getByText('+50'))
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/nodes/fitness-room/devices/AA:BB:CC:DD:EE:FF/delay')
   })
 })

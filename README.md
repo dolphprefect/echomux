@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/dolphprefect/echomux/actions/workflows/ci.yml/badge.svg)](https://github.com/dolphprefect/echomux/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/tag/dolphprefect/echomux?label=release&color=0ea5e9)](https://github.com/dolphprefect/echomux/releases/latest)
-[![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-2563eb)](LICENSE)
+[![License](https://img.shields.io/badge/license-Elastic--2.0-2563eb)](LICENSE)
 
 [Features](#features) | [Hardware](#hardware) | [Installation](#installation) | [Usage](#how-to-use) | [Multi-node](#multi-node-setup-satellite) | [Configuration](#configuration) | [License](#license)
 
@@ -200,4 +200,4 @@ echomux is free, open-source software. If it brings music to your home, a coffee
 
 ## License
 
-MIT + Commons Clause. Free to use personally and commercially (internal use), but you may not sell echomux or offer it as a paid service. See [LICENSE](LICENSE).
+Elastic License 2.0. Free to use, modify, and self-host. You may not offer echomux as a hosted or managed service to third parties. See [LICENSE](LICENSE).

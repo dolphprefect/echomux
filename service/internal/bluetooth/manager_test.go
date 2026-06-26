@@ -256,3 +256,27 @@ func TestMockManager_Disconnect_ReturnsDeviceNotFound(t *testing.T) {
 	var nf *bluetooth.DeviceNotFoundError
 	assert.ErrorAs(t, err, &nf)
 }
+
+func TestMockManager_SetDisconnectErr(t *testing.T) {
+	m := bluetooth.NewMockManager()
+	m.AddDevice(bluetooth.Device{MAC: "AA:BB:CC:DD:EE:FF", Name: "Speaker A", Paired: true})
+	m.SetDisconnectErr(errors.New("dbus timeout"))
+
+	err := m.Disconnect(context.Background(), "AA:BB:CC:DD:EE:FF")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dbus timeout")
+
+	// Even a missing MAC goes through the error path first.
+	err = m.Disconnect(context.Background(), "00:00:00:00:00:00")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dbus timeout")
+}
+
+func TestMockManager_SetScanErr(t *testing.T) {
+	m := bluetooth.NewMockManager()
+	m.SetScanErr(errors.New("hci0 down"))
+
+	err := m.Scan(context.Background(), 100*time.Millisecond)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "hci0 down")
+}

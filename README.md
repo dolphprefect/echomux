@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/dolphprefect/echomux/actions/workflows/ci.yml/badge.svg)](https://github.com/dolphprefect/echomux/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/tag/dolphprefect/echomux?label=release&color=0ea5e9)](https://github.com/dolphprefect/echomux/releases/latest)
-[![License](https://img.shields.io/badge/license-Elastic--2.0-2563eb)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-2563eb)](LICENSE)
 
 [Features](#features) | [Hardware](#hardware) | [Installation](#installation) | [Usage](#how-to-use) | [Multi-node](#multi-node-setup-satellite) | [Configuration](#configuration) | [License](#license)
 
@@ -200,4 +200,4 @@ echomux is free. If it's running in your home and your speakers are in sync, a c
 
 ## License
 
-Elastic License 2.0. Free to use, modify, and self-host. You may not offer echomux as a hosted or managed service to third parties. See [LICENSE](LICENSE).
+Apache License 2.0. Free to use, modify, distribute, and self-host. See [LICENSE](LICENSE).

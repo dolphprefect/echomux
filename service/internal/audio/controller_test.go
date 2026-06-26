@@ -2,6 +2,7 @@ package audio_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -225,4 +226,56 @@ func TestController_Links(t *testing.T) {
 	call := spy.lastCall()
 	assert.Equal(t, "pw-dump", call[0])
 	assert.Equal(t, "--no-colors", call[1])
+}
+
+func execError() *spyExecutor {
+	return &spyExecutor{
+		outputs: [][]byte{{}},
+		errors:  []error{errors.New("exec failed")},
+	}
+}
+
+func TestController_Snapshot_ExecError(t *testing.T) {
+	c := audio.NewController(execError())
+	_, err := c.Snapshot(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, "pw-dump: exec failed", err.Error())
+}
+
+func TestController_Nodes_ExecError(t *testing.T) {
+	c := audio.NewController(execError())
+	_, err := c.Nodes(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, "pw-dump: exec failed", err.Error())
+}
+
+func TestController_Sources_ExecError(t *testing.T) {
+	c := audio.NewController(execError())
+	_, err := c.Sources(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, "pw-dump: exec failed", err.Error())
+}
+
+func TestController_Links_ExecError(t *testing.T) {
+	c := audio.NewController(execError())
+	_, err := c.Links(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, "pw-dump: exec failed", err.Error())
+}
+
+func TestController_NodeByName_ExecError(t *testing.T) {
+	c := audio.NewController(execError())
+	_, err := c.NodeByName(context.Background(), "any")
+	require.Error(t, err)
+	assert.Equal(t, "pw-dump: exec failed", err.Error())
+}
+
+func TestController_GetVolume_ExecError(t *testing.T) {
+	spy := &spyExecutor{
+		outputs: [][]byte{{}},
+		errors:  []error{errors.New("wpctl failed")},
+	}
+	c := audio.NewController(spy)
+	_, err := c.GetVolume(context.Background(), 42)
+	require.Error(t, err)
 }

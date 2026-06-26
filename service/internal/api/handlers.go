@@ -34,8 +34,9 @@ type server struct {
 	name       string
 	masterAddr string
 	selfAddr   string // satellite only: public host:port reported in register message
-	clientCtx  context.Context
-	rtpPort    int
+	clientCtx   context.Context
+	shutdownCtx context.Context
+	rtpPort     int
 
 	nodes             *nodeRegistry
 	heartbeatInterval time.Duration
@@ -82,6 +83,13 @@ func WithSelfAddr(addr string) Option       { return func(s *server) { s.selfAdd
 // The satellite client is only started when this option is set and mode is satellite.
 // Pass the application's signal context from main; pass a test-cancellable context in tests.
 func WithClientContext(ctx context.Context) Option { return func(s *server) { s.clientCtx = ctx } }
+
+// WithShutdownContext provides a context whose cancellation stops the autorouter,
+// the event forwarder, and any open WebSocket handlers. Pass the application's
+// signal context from main; pass a t.Cleanup-cancelled context in tests.
+func WithShutdownContext(ctx context.Context) Option {
+	return func(s *server) { s.shutdownCtx = ctx }
+}
 
 // WithHeartbeat overrides the default heartbeat intervals — intended for tests.
 func WithHeartbeat(interval, pongTimeout time.Duration) Option {
@@ -135,6 +143,9 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 	for _, o := range opts {
 		o(s)
 	}
+	if s.shutdownCtx == nil {
+		s.shutdownCtx = context.Background()
+	}
 	// Resolve hostname as a last-resort name — covers callers that omit WithName
 	// (e.g. tests and programmatic use). main.go passes defaultName() via WithName,
 	// so this branch fires only when WithName is absent or explicitly set to "".
@@ -154,12 +165,12 @@ func NewServer(bt bluetooth.Manager, audio audio.Controller, opts ...Option) htt
 	}
 	s.mux = http.NewServeMux()
 	s.routes()
-	go s.hub.RunEventForwarder(context.Background(), bt.Events())
-	s.startAutoRouter(context.Background(), 2*time.Second)
+	go s.hub.RunEventForwarder(s.shutdownCtx, bt.Events())
+	s.startAutoRouter(s.shutdownCtx, 2*time.Second)
 	if s.mode == ModeSatellite && s.masterAddr != "" && s.clientCtx != nil {
 		go s.runSatelliteClient(s.clientCtx)
 	}
-	go s.startupConnect(context.Background())
+	go s.startupConnect(s.shutdownCtx)
 	return s.mux
 }
 
@@ -918,6 +929,22 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.add(c)
 	defer s.hub.remove(c)
-	<-r.Context().Done()
-	c.CloseNow()
+	defer c.CloseNow()
+
+	// Read pump: detect client disconnect promptly. Any read error (close frame,
+	// TCP reset, context cancel) closes the done channel and unblocks the select.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := c.Read(r.Context()); err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-s.shutdownCtx.Done():
+	}
 }

@@ -82,6 +82,7 @@ func main() {
 		api.WithSelfAddr(*selfAddr),
 		api.WithRTPPort(*rtpPort),
 		api.WithClientContext(ctx),
+		api.WithShutdownContext(ctx),
 	)
 
 	httpSrv := &http.Server{Addr: *addr, Handler: srv}

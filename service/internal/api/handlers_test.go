@@ -19,6 +19,7 @@ import (
 	"github.com/dolphprefect/echomux/internal/bluetooth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"nhooyr.io/websocket"
 )
 
 func mustReadBody(t *testing.T, resp *http.Response) string {
@@ -961,6 +962,153 @@ func TestGetInput_EmptySources(t *testing.T) {
 	var sources []map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sources))
 	assert.Empty(t, sources, "empty sources must return an empty JSON array, not null")
+}
+
+func TestWithDebugOption(t *testing.T) {
+	btMgr := bluetooth.NewMockManager()
+	btMgr.AddDevice(bluetooth.Device{MAC: "AA:BB:CC:DD:EE:FF", Name: "Speaker A", Paired: true})
+	audioCtr := audio.NewMockController([]audio.Node{
+		{ID: 42, MAC: "AA:BB:CC:DD:EE:FF", Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"},
+	})
+	shutCtx, shutCancel := context.WithCancel(context.Background())
+	noop := func(_ string, _ int) *exec.Cmd { return exec.Command("true") }
+	srv := api.NewServer(btMgr, audioCtr,
+		api.WithSpawn(noop),
+		api.WithKnownSpeakers("AA:BB:CC:DD:EE:FF"),
+		api.WithDebug(true),
+		api.WithShutdownContext(shutCtx),
+	)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(func() { shutCancel(); ts.Close() })
+
+	// Debug mode wraps the mux with a logging handler; all endpoints must still work.
+	resp, err := http.Get(ts.URL + "/devices")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Volume set with debug should also read volume before/after (exercises dbg calls).
+	body, _ := json.Marshal(map[string]int{"level": 60})
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/devices/AA:BB:CC:DD:EE:FF/volume", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp2, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp2.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp2.StatusCode)
+
+	// POST /scan in debug mode exercises statusWriter.Flush via the scan handler's
+	// header-flush before the scan starts.
+	scanBody, _ := json.Marshal(map[string]int{"timeout_sec": 1})
+	resp3, err := http.Post(ts.URL+"/scan", "application/json", bytes.NewReader(scanBody))
+	require.NoError(t, err)
+	resp3.Body.Close()
+	assert.Equal(t, http.StatusOK, resp3.StatusCode)
+
+	// Connecting via WebSocket in debug mode exercises statusWriter.Hijack.
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer dialCancel()
+	c, _, err := websocket.Dial(dialCtx, "ws"+ts.URL[4:]+"/events", nil)
+	require.NoError(t, err)
+	defer c.CloseNow()
+}
+
+func TestWithRTPPort(t *testing.T) {
+	btMgr := bluetooth.NewMockManager()
+	audioCtr := audio.NewMockController(nil)
+	noop := func(_ string, _ int) *exec.Cmd { return exec.Command("true") }
+	// WithRTPPort must not panic or fail server construction.
+	srv := api.NewServer(btMgr, audioCtr,
+		api.WithSpawn(noop),
+		api.WithRTPPort(9099),
+	)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/devices")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestStateFile_CorruptedJSON(t *testing.T) {
+	dir := t.TempDir()
+	stateFile := filepath.Join(dir, "state.json")
+	require.NoError(t, os.WriteFile(stateFile, []byte("{not valid json}"), 0644))
+
+	btMgr := bluetooth.NewMockManager()
+	btMgr.AddDevice(bluetooth.Device{MAC: "AA:BB:CC:DD:EE:FF", Name: "Speaker A", Paired: true})
+	audioCtr := audio.NewMockController(nil)
+	noop := func(_ string, _ int) *exec.Cmd { return exec.Command("true") }
+
+	// Corrupted state file must not panic; server should start with defaults.
+	srv := api.NewServer(btMgr, audioCtr,
+		api.WithSpawn(noop),
+		api.WithStateFile(stateFile),
+		api.WithKnownSpeakers("AA:BB:CC:DD:EE:FF"),
+	)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/devices")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestPostRestart_WithActiveLoopback(t *testing.T) {
+	btMgr := bluetooth.NewMockManager()
+	btMgr.AddDevice(bluetooth.Device{MAC: "AA:BB:CC:DD:EE:FF", Name: "Speaker A", Paired: true})
+	nodes := []audio.Node{{ID: 42, MAC: "AA:BB:CC:DD:EE:FF", Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"}}
+	audioCtr := audio.NewMockController(nodes)
+
+	shutCtx, shutCancel := context.WithCancel(context.Background())
+	longLived := func(_ string, _ int) *exec.Cmd { return exec.Command("sleep", "5") }
+	srv := api.NewServer(btMgr, audioCtr,
+		api.WithSpawn(longLived),
+		api.WithKnownSpeakers("AA:BB:CC:DD:EE:FF"),
+		api.WithShutdownContext(shutCtx),
+	)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(func() { shutCancel(); ts.Close() })
+
+	// Resume triggers tickRouter synchronously, which starts the loopback.
+	http.Post(ts.URL+"/playback/pause", "application/json", nil)   //nolint
+	http.Post(ts.URL+"/playback/resume", "application/json", nil)  //nolint
+
+	resp, err := http.Post(ts.URL+"/playback/restart", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+}
+
+func TestPutDelay_WithActiveLoopback(t *testing.T) {
+	btMgr := bluetooth.NewMockManager()
+	btMgr.AddDevice(bluetooth.Device{MAC: "AA:BB:CC:DD:EE:FF", Name: "Speaker A", Paired: true})
+	nodes := []audio.Node{{ID: 42, MAC: "AA:BB:CC:DD:EE:FF", Name: "bluez_output.AA_BB_CC_DD_EE_FF.1"}}
+	audioCtr := audio.NewMockController(nodes)
+
+	shutCtx, shutCancel := context.WithCancel(context.Background())
+	longLived := func(_ string, _ int) *exec.Cmd { return exec.Command("sleep", "5") }
+	srv := api.NewServer(btMgr, audioCtr,
+		api.WithSpawn(longLived),
+		api.WithKnownSpeakers("AA:BB:CC:DD:EE:FF"),
+		api.WithShutdownContext(shutCtx),
+	)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(func() { shutCancel(); ts.Close() })
+
+	// Resume triggers tickRouter synchronously, which starts the loopback.
+	http.Post(ts.URL+"/playback/pause", "application/json", nil)   //nolint
+	http.Post(ts.URL+"/playback/resume", "application/json", nil)  //nolint
+
+	// Now change the delay while the loopback is alive — exercises the restart path.
+	body, _ := json.Marshal(map[string]int{"ms": 300})
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/devices/AA:BB:CC:DD:EE:FF/delay", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
 func TestStateFilePersistence(t *testing.T) {

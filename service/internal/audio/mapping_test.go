@@ -188,3 +188,18 @@ func TestParseNodeByName_InvalidJSON(t *testing.T) {
 	_, err := audio.ParseNodeByName([]byte("{bad json"), "x")
 	require.Error(t, err)
 }
+
+func TestParseSources_InvalidJSON(t *testing.T) {
+	_, err := audio.ParseSources([]byte("{bad json"))
+	require.Error(t, err)
+}
+
+func TestParseSourceNodeID_InvalidJSON(t *testing.T) {
+	_, err := audio.ParseSourceNodeID([]byte("{bad json"), "rtp-source")
+	require.Error(t, err)
+}
+
+func TestParseNodesByName_InvalidJSON(t *testing.T) {
+	_, err := audio.ParseNodesByName([]byte("{bad json"))
+	require.Error(t, err)
+}

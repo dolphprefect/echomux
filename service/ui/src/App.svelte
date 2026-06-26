@@ -287,6 +287,10 @@
   {/if}
 </main>
 
+<footer>
+  <a href="https://buymeacoffee.com/dolphprefect" target="_blank" rel="noopener">enjoying echomux? buy me a coffee</a>
+</footer>
+
 {#if scanOpen}
   <ScanSheet {knownMACs} nodeId={nodeApiId(scanningNodeId)} on:close={handleScanClose} />
 {/if}
@@ -311,5 +315,19 @@
   }
   .nodes-container {
     margin-top: 16px;
+  }
+  footer {
+    text-align: center;
+    padding: 32px 0 24px;
+  }
+  footer a {
+    font-size: 0.75rem;
+    color: var(--sub);
+    text-decoration: none;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+  }
+  footer a:hover {
+    opacity: 1;
   }
 </style>

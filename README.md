@@ -192,9 +192,9 @@ Set `ECHOMUX_ADAPTER=hci1` in `/etc/echomux/echomux.conf` and restart the servic
 
 ## Support the project
 
-echomux is free, open-source software. If it brings music to your home, a coffee goes a long way:
+echomux is free. If it's running in your home and your speakers are in sync, a coffee is always appreciated.
 
-[☕ buymeacoffee.com/dolphprefect](https://buymeacoffee.com/dolphprefect)
+[buymeacoffee.com/dolphprefect](https://buymeacoffee.com/dolphprefect)
 
 ---
 

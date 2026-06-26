@@ -56,7 +56,7 @@ describe('DeviceCard', () => {
 
     await fireEvent.click(container.querySelector('.btn-connect'))
     expect(handler).toHaveBeenCalled()
-    expect(handler.mock.calls[0][0].detail).toBe('AA:BB:CC:DD:EE:FF')
+    expect(handler.mock.calls[0][0].detail).toEqual({ mac: 'AA:BB:CC:DD:EE:FF', nodeId: undefined })
   })
 
   it('dispatches disconnect event on power button click', async () => {
@@ -245,5 +245,60 @@ describe('DeviceCard', () => {
     const forgetBtn = container.querySelector('.btn-forget')
     expect(connectBtn.disabled).toBe(true)
     expect(forgetBtn.disabled).toBe(true)
+  })
+
+  // Regression: volume and mute must use the nodeId prop, not device.node_id,
+  // so master devices (nodeId=undefined) call /devices/{mac}/... directly and
+  // don't hit the proxy which returns 404 for the master's own node id.
+  it('calls /devices/{mac}/volume directly when nodeId is undefined (master device)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204, headers: { get: () => '' } })
+    const dev = { ...baseDevice, Connected: true, node_id: 'living-room' }
+    const { container } = render(DeviceCard, { props: { device: dev, nodeId: undefined } })
+
+    const slider = container.querySelector('input[type="range"]')
+    await fireEvent.input(slider, { target: { value: '75' } })
+    await fireEvent.change(slider, { target: { value: '75' } })
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/devices/AA:BB:CC:DD:EE:FF/volume')
+  })
+
+  it('calls /nodes/{id}/devices/{mac}/volume when nodeId is set (satellite device)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204, headers: { get: () => '' } })
+    const dev = { ...baseDevice, Connected: true, node_id: 'fitness-room' }
+    const { container } = render(DeviceCard, { props: { device: dev, nodeId: 'fitness-room' } })
+
+    const slider = container.querySelector('input[type="range"]')
+    await fireEvent.input(slider, { target: { value: '75' } })
+    await fireEvent.change(slider, { target: { value: '75' } })
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/nodes/fitness-room/devices/AA:BB:CC:DD:EE:FF/volume')
+  })
+
+  it('calls /devices/{mac}/mute directly when nodeId is undefined (master device)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204, headers: { get: () => '' } })
+    const dev = { ...baseDevice, Connected: true, node_id: 'living-room' }
+    const { container } = render(DeviceCard, { props: { device: dev, nodeId: undefined } })
+
+    await fireEvent.click(container.querySelector('.btn-mute'))
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/devices/AA:BB:CC:DD:EE:FF/mute')
+  })
+
+  it('calls /nodes/{id}/devices/{mac}/mute when nodeId is set (satellite device)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204, headers: { get: () => '' } })
+    const dev = { ...baseDevice, Connected: true, node_id: 'fitness-room' }
+    const { container } = render(DeviceCard, { props: { device: dev, nodeId: 'fitness-room' } })
+
+    await fireEvent.click(container.querySelector('.btn-mute'))
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/nodes/fitness-room/devices/AA:BB:CC:DD:EE:FF/mute')
   })
 })

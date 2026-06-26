@@ -69,6 +69,7 @@
       {#each sorted as device (device.MAC)}
         <DeviceCard
           {device}
+          nodeId={isMaster ? undefined : device.node_id}
           isConnecting={connecting.has(device.MAC)}
           connectError={connectErrors[device.MAC] || null}
           disabled={isThrottleActive}

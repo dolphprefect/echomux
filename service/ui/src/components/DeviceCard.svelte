@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js'
 
   export let device
+  export let nodeId = undefined
   export let isConnecting = false
   export let connectError = null
   export let disabled = false
@@ -28,7 +29,7 @@
     if (disabled) return
     const muted = !device.Muted
     dispatch('muteChange', { mac: device.MAC, muted })
-    try { await api('PUT', `/devices/${device.MAC}/mute`, { muted }, device.node_id) } catch(e) {
+    try { await api('PUT', `/devices/${device.MAC}/mute`, { muted }, nodeId) } catch(e) {
       dispatch('muteChange', { mac: device.MAC, muted: !muted })
     }
   }
@@ -45,7 +46,7 @@
     const level = parseInt(e.target.value)
     localVol = level
     dispatch('volumeChange', { mac: device.MAC, level })
-    try { await api('PUT', `/devices/${device.MAC}/volume`, { level }, device.node_id) } catch(e) {}
+    try { await api('PUT', `/devices/${device.MAC}/volume`, { level }, nodeId) } catch(e) {}
   }
 </script>
 

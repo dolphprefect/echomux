@@ -223,7 +223,7 @@ Custom files installed to `/etc/wireplumber/wireplumber.conf.d/`:
 
 ## BlueZ requirements
 
-echomux requires **BlueZ 5.83 or later**. BlueZ ≤ 5.82 cannot maintain simultaneous A2DP connections to more than one sink device (fixed in commit `05f8bd4`). The install script builds BlueZ from source.
+echomux requires **BlueZ 5.83 or later**. BlueZ ≤ 5.82 cannot maintain simultaneous A2DP connections to more than one sink device (fixed in commit `05f8bd4`). If the system ships an older version, build BlueZ from source.
 
 ---
 

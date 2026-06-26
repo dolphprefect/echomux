@@ -288,7 +288,7 @@
 </main>
 
 <footer>
-  <a href="https://buymeacoffee.com/dolphprefect" target="_blank" rel="noopener">enjoying echomux? buy me a coffee</a>
+  <a href="https://buymeacoffee.com/dolphprefect" target="_blank" rel="noopener">support <b>echo</b><span class="sep">·</span><span class="mux">mux</span></a>
 </footer>
 
 {#if scanOpen}
@@ -329,5 +329,15 @@
   }
   footer a:hover {
     opacity: 1;
+  }
+  footer a b {
+    color: var(--text);
+    font-weight: 600;
+  }
+  footer a .mux {
+    font-weight: 600;
+  }
+  footer a .sep {
+    color: var(--gold);
   }
 </style>

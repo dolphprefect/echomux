@@ -214,9 +214,7 @@ else
         flex bison libdbus-1-dev libglib2.0-dev libudev-dev \
         libreadline-dev libical-dev libjson-c-dev libdw-dev libell-dev
 
-    BLUEZ_VER=$(curl -fsSL https://api.github.com/repos/bluez/bluez/releases/latest \
-        | grep -oP '"tag_name":\s*"\K[^"]+' \
-        | sed 's/^v//')
+    BLUEZ_VER="5.86"
     echo "==> Building BlueZ ${BLUEZ_VER}..."
     TARBALL="bluez-${BLUEZ_VER}.tar.xz"
     curl -fL -o "/tmp/${TARBALL}" \

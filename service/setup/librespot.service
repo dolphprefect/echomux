@@ -1,6 +1,7 @@
 [Unit]
 Description=Librespot Spotify Connect
-After=pipewire-system.service wireplumber-system.service
+After=pipewire-system.service wireplumber-system.service network-online.target
+Wants=network-online.target
 Requires=pipewire-system.service
 
 [Service]
@@ -8,7 +9,7 @@ User=REPLACE_USER
 EnvironmentFile=/etc/echomux/echomux.conf
 ExecStartPre=/bin/sleep 3
 ExecStart=/usr/local/bin/librespot-pipewire.sh
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]
